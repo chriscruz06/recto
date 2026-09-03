@@ -1,0 +1,33 @@
+# Source scans and working output.
+# Scanned volumes run to hundreds of megabytes and are reproducible from the
+# original PDF, so neither the input nor anything derived from it belongs here.
+# Test fixtures are committed as small PNGs under tests/fixtures/ instead.
+*.pdf
+work/
+out/
+debug/
+scans/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
