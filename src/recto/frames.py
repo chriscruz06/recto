@@ -27,6 +27,15 @@ class Provenance:
     page_index: int
     """Zero-based index of the PDF page holding the spread."""
 
+    dpi: int = 300
+    """Resolution the page was rendered at.
+
+    Carried because several stages have thresholds measured in pixels, and a
+    pixel means something different at 600 dpi. A stage that hardcodes a pixel
+    count fails quietly when the resolution changes: it keeps running and stops
+    working.
+    """
+
     side: str | None = None
     """VERSO or RECTO once the spread has been split, None before that."""
 

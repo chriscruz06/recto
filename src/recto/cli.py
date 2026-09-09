@@ -161,7 +161,7 @@ def run_command(
         for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
             frame = Frame(
                 image=page.image,
-                provenance=Provenance(source=pdf, page_index=page.index),
+                provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
             )
             results = pipeline.run(frame, observer=writer)
             click.echo(f"p{page.number:<5} {len(results)} frame(s) out")

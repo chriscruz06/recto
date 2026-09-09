@@ -30,6 +30,14 @@ class StageOutput:
     findings: list[Finding] = field(default_factory=list)
     """What the stage located in its input frame."""
 
+    summary: str = ""
+    """One line on what the stage did, for the debug caption.
+
+    Findings are often capped for legibility, so the number drawn is not the
+    number found. This is where a stage says what actually happened: how many
+    components it removed, what angle it corrected, how many columns it saw.
+    """
+
 
 class Stage(Protocol):
     """A single step in the pipeline.

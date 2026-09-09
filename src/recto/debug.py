@@ -8,6 +8,7 @@ code answers that as fast as looking at one picture per stage.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,7 +42,8 @@ _COLOURS: dict[str, tuple[int, int, int]] = {
 }
 _FALLBACK_COLOUR = (255, 0, 255)
 
-_CAPTION_HEIGHT = 30
+_CAPTION_LINE = 22
+_CAPTION_PAD = 8
 _CAPTION_BACKGROUND = (28, 22, 26)
 _CAPTION_TEXT = (238, 238, 238)
 
@@ -50,7 +52,7 @@ def draw_overlay(
     image: np.ndarray,
     findings: list[Finding],
     *,
-    caption: str | None = None,
+    captions: Sequence[str] = (),
     max_width: int = DEFAULT_MAX_WIDTH,
 ) -> np.ndarray:
     """Draw findings over a greyscale image and return a viewable BGR copy.
@@ -94,20 +96,21 @@ def draw_overlay(
             interpolation=cv2.INTER_AREA,
         )
 
-    if caption:
-        cv2.rectangle(
-            canvas, (0, 0), (canvas.shape[1], _CAPTION_HEIGHT), _CAPTION_BACKGROUND, -1
-        )
-        cv2.putText(
-            canvas,
-            caption,
-            (10, 21),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            _CAPTION_TEXT,
-            1,
-            cv2.LINE_AA,
-        )
+    lines = [line for line in captions if line]
+    if lines:
+        bar = len(lines) * _CAPTION_LINE + _CAPTION_PAD
+        cv2.rectangle(canvas, (0, 0), (canvas.shape[1], bar), _CAPTION_BACKGROUND, -1)
+        for row, line in enumerate(lines):
+            cv2.putText(
+                canvas,
+                line,
+                (10, _CAPTION_PAD + _CAPTION_LINE * row + 11),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                _CAPTION_TEXT,
+                1,
+                cv2.LINE_AA,
+            )
 
     return canvas
 
@@ -137,17 +140,17 @@ class DebugWriter:
         directory = self.root / incoming.provenance.source.stem / label
         path = directory / f"{order:02d}_{stage.name}.png"
 
-        caption = (
+        headline = (
             f"{order:02d} {stage.name}   {label}   "
-            f"{incoming.width}x{incoming.height}   "
-            f"{len(output.findings)} finding(s)   "
+            f"{incoming.width}x{incoming.height} @ {incoming.provenance.dpi}dpi   "
+            f"{len(output.findings)} drawn   "
             f"-> {len(output.frames)} frame(s)"
         )
 
         overlay = draw_overlay(
             incoming.image,
             output.findings,
-            caption=caption,
+            captions=(headline, output.summary),
             max_width=self.max_width,
         )
         write_png(path, overlay)
