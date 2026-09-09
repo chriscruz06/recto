@@ -18,9 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-import cv2
 import numpy as np
 import pypdfium2 as pdfium
+
+from recto.pngio import read_png, write_png
 
 # The Jammy scans are 300 dpi bitonal images, and rendering a scan above its own
 # resolution only interpolates. That softens every glyph edge, which costs
@@ -187,37 +188,11 @@ def rasterise(
             path = cache_path(out_dir, source, index, dpi)
 
             if path.exists() and not force:
-                yield RasterPage(index=index, path=path, image=_read_png(path))
+                yield RasterPage(index=index, path=path, image=read_png(path))
                 continue
 
             image = render_page(pdf[index], dpi)
-            _write_png(path, image)
+            write_png(path, image)
             yield RasterPage(index=index, path=path, image=image)
     finally:
         pdf.close()
-
-
-def _write_png(path: Path, image: np.ndarray) -> None:
-    """Write a greyscale PNG, creating parent directories as needed.
-
-    This goes the long way round rather than calling cv2.imwrite, because
-    imwrite hands the path to a C++ layer that cannot open a filename holding
-    non-ASCII characters on Windows, and reports the failure by returning False
-    rather than raising. Encoding in memory and writing the bytes through
-    pathlib sidesteps both behaviours.
-    """
-    ok, buffer = cv2.imencode(".png", image)
-    if not ok:
-        raise RuntimeError(f"could not encode {path.name} as PNG")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(buffer.tobytes())
-
-
-def _read_png(path: Path) -> np.ndarray:
-    """Read a greyscale PNG. See _write_png for why cv2.imread is avoided."""
-    data = np.frombuffer(path.read_bytes(), dtype=np.uint8)
-    image = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
-    if image is None:
-        raise RuntimeError(f"could not decode {path}")
-    return image

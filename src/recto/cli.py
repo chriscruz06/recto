@@ -14,7 +14,11 @@ import click
 import pypdfium2 as pdfium
 
 from recto import __version__
+from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
+from recto.frames import Frame, Provenance
+from recto.pipeline import Pipeline
 from recto.raster import DEFAULT_CACHE, DEFAULT_DPI, native_dpi, rasterise
+from recto.stages import default_stages
 
 # Accept -h as well as --help. Click only accepts --help by default, and
 # reaching for -h out of habit and getting an error gets old quickly.
@@ -92,6 +96,82 @@ def raster_command(
         raise click.BadParameter(str(exc), param_hint="--pages") from exc
 
     click.echo(f"{written} page(s) under {out_dir}")
+
+
+@main.command("run")
+@click.argument(
+    "pdf",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+)
+@click.option(
+    "--pages",
+    metavar="RANGE",
+    default=None,
+    help=(
+        "Pages to process, one-based and inclusive: 9, or 8-10, or 1,4,7-9. "
+        "Defaults to every page."
+    ),
+)
+@click.option(
+    "--dpi",
+    type=click.IntRange(72, 1200),
+    default=DEFAULT_DPI,
+    show_default=True,
+    help="Render resolution.",
+)
+@click.option(
+    "--cache",
+    "cache_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_CACHE,
+    show_default=True,
+    help="Cache directory for rendered pages.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Write one overlay image per stage showing what that stage found.",
+)
+@click.option(
+    "--debug-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_DEBUG_DIR,
+    show_default=True,
+    help="Where debug overlays are written.",
+)
+def run_command(
+    pdf: Path,
+    pages: str | None,
+    dpi: int,
+    cache_dir: Path,
+    debug: bool,
+    debug_dir: Path,
+) -> None:
+    """Run the processing pipeline over the selected pages.
+
+    Each page starts as one frame holding the whole spread. Stages narrow it,
+    so the frame count reported per page grows as splitting stages are added
+    and shrinks when a page turns out to be blank.
+    """
+    pipeline = Pipeline(default_stages())
+    writer = DebugWriter(root=debug_dir) if debug else None
+
+    produced = 0
+    try:
+        for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
+            frame = Frame(
+                image=page.image,
+                provenance=Provenance(source=pdf, page_index=page.index),
+            )
+            results = pipeline.run(frame, observer=writer)
+            click.echo(f"p{page.number:<5} {len(results)} frame(s) out")
+            produced += len(results)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--pages") from exc
+
+    click.echo(f"{produced} frame(s) from {len(pipeline.stages)} stage(s)")
+    if writer is not None:
+        click.echo(f"{len(writer.written)} overlay(s) under {debug_dir}")
 
 
 def _warn_if_upsampling(source: Path, dpi: int) -> None:
