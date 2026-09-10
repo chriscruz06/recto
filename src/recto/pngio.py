@@ -9,6 +9,7 @@ and write in the codebase goes through here.
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import cv2
@@ -22,7 +23,21 @@ def write_png(path: Path, image: np.ndarray) -> None:
         raise RuntimeError(f"could not encode {path.name} as PNG")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(buffer.tobytes())
+    try:
+        path.write_bytes(buffer.tobytes())
+    except OSError as exc:
+        # A file open in another program is the common failure here, because
+        # the tuning loop is: look at an overlay, change a threshold, run
+        # again. Windows reports a plain lock as EACCES, but reports a file
+        # another process has memory-mapped, which is what image viewers do,
+        # as EINVAL. "Invalid argument" on a path that is plainly valid sends
+        # you looking in entirely the wrong place, so name the real cause.
+        if exc.errno in (errno.EACCES, errno.EINVAL):
+            raise RuntimeError(
+                f"could not write {path}: {exc.strerror}. "
+                "If it is open in an image viewer, close it and run again."
+            ) from exc
+        raise
 
 
 def read_png(path: Path, *, greyscale: bool = True) -> np.ndarray:

@@ -18,7 +18,7 @@ from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
 from recto.frames import Frame, Provenance
 from recto.pipeline import Pipeline
 from recto.raster import DEFAULT_CACHE, DEFAULT_DPI, native_dpi, rasterise
-from recto.stages import default_stages
+from recto.stages.registry import default_stages
 
 # Accept -h as well as --help. Click only accepts --help by default, and
 # reaching for -h out of habit and getting an error gets old quickly.
