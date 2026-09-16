@@ -11,6 +11,7 @@ from __future__ import annotations
 from recto.pipeline import Stage
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
+from recto.stages.gutter import FindGutter
 
 
 def default_stages() -> list[Stage]:
@@ -19,6 +20,7 @@ def default_stages() -> list[Stage]:
     CropBorder runs first because everything after it measures ink, and the
     black scanner border is more ink than the text is. Despeckle runs second
     for the same reason: every projection profile from here on is counting ink,
-    and a speck is ink.
+    and a speck is ink. FindGutter runs third, on the first image clean enough
+    for its column profile to mean anything.
     """
-    return [CropBorder(), Despeckle()]
+    return [CropBorder(), Despeckle(), FindGutter()]
