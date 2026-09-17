@@ -48,16 +48,17 @@ The stage reports a runner-up: the darkest point in the window outside the
 band. On most pages that is ordinary text ink, around 0.25, though on page 11
 it is the second lobe of the fold itself at 0.56. The peak beats it by a
 median factor of 3.1, worst 1.78. A page where that ratio approaches 1 is one
-the split should not trust, which is the number commit 07 needs and the reason
-it is in the summary line.
+whose fold was not clearly the darkest band near the middle, which is why
+SplitSpread prints it.
 
-This stage detects and reports. It does not cut. The split calls find_gutter
-itself rather than reading a result left on the frame, because a note passed
-from one stage to another is a channel the debug overlay cannot show.
+This module measures and does not cut. It holds no stage of its own: SplitSpread
+calls find_gutter, rather than a detection stage leaving its result on the frame
+for the split to pick up, because a note passed from one stage to another is a
+channel the debug overlay cannot show.
 
 Known limitation, found on page 11: where the binding shadow has two dark
 lobes the band takes the darker one and the other survives as a stripe at the
-edge of a page. It is the split's business to decide whether that matters.
+edge of a page. See split.py for what that costs.
 """
 
 from __future__ import annotations
@@ -65,9 +66,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
-from recto.frames import Box, Finding, Frame, Line
-from recto.pipeline import StageOutput
 
 SEARCH_FRACTION = 0.12
 """Search this fraction of the width either side of centre."""
@@ -185,56 +183,3 @@ def find_gutter(
         runner_up, runner_up_at = 0.0, centre
 
     return Gutter(left, right, peak, floor, runner_up, runner_up_at, (lo, hi))
-
-
-class FindGutter:
-    """Report where the gutter is, without cutting anything yet."""
-
-    name = "find-gutter"
-
-    def __init__(
-        self,
-        *,
-        search_fraction: float = SEARCH_FRACTION,
-        smooth_width: int = SMOOTH_WIDTH,
-        reference_dpi: int = REFERENCE_DPI,
-        ink_below: int = INK_BELOW,
-    ) -> None:
-        self.search_fraction = search_fraction
-        self.smooth_width = smooth_width
-        self.reference_dpi = reference_dpi
-        self.ink_below = ink_below
-
-    def apply(self, frame: Frame) -> StageOutput:
-        gutter = find_gutter(
-            frame.image,
-            frame.provenance.dpi,
-            search_fraction=self.search_fraction,
-            smooth_width=self.smooth_width,
-            reference_dpi=self.reference_dpi,
-            ink_below=self.ink_below,
-        )
-
-        lo, hi = gutter.window
-        findings = [
-            Finding("bounds", Box(lo, 0, hi - lo, frame.height), note="search window")
-        ]
-
-        if not gutter.found:
-            return StageOutput(
-                frames=[frame],
-                findings=findings,
-                summary="no ink in the search window, no gutter found",
-            )
-
-        findings += [
-            Finding("gutter", Box(gutter.left, 0, gutter.width, frame.height)),
-            Finding("gutter", Line(gutter.centre, 0, gutter.centre, frame.height)),
-        ]
-        summary = (
-            f"gutter x{gutter.centre}, band {gutter.left} to {gutter.right} "
-            f"({gutter.width}px), peak {gutter.peak:.2f}, floor {gutter.floor:.2f}, "
-            f"next {gutter.runner_up:.2f} at x{gutter.runner_up_at} "
-            f"({gutter.margin:.1f}x)"
-        )
-        return StageOutput(frames=[frame], findings=findings, summary=summary)
