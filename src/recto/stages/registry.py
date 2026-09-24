@@ -11,6 +11,7 @@ from __future__ import annotations
 from recto.pipeline import Stage
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
+from recto.stages.deskew import Deskew
 from recto.stages.split import SplitSpread
 
 
@@ -22,6 +23,8 @@ def default_stages() -> list[Stage]:
     for the same reason: every projection profile from here on is counting ink,
     and a speck is ink. SplitSpread runs third, on the first image clean enough
     for its column profile to mean anything, and is the last stage that sees a
-    whole spread. Everything after it works on one page at a time.
+    whole spread. Everything after it works on one page at a time, starting with
+    Deskew, which has to run per page because the two halves of one spread are
+    tilted by different amounts.
     """
-    return [CropBorder(), Despeckle(), SplitSpread()]
+    return [CropBorder(), Despeckle(), SplitSpread(), Deskew()]
