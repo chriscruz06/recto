@@ -9,6 +9,7 @@ the same name and different jobs is a mistake waiting to happen.
 from __future__ import annotations
 
 from recto.pipeline import Stage
+from recto.stages.blank import DropBlank
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
 from recto.stages.deskew import Deskew
@@ -26,5 +27,9 @@ def default_stages() -> list[Stage]:
     whole spread. Everything after it works on one page at a time, starting with
     Deskew, which has to run per page because the two halves of one spread are
     tilted by different amounts.
+
+    DropBlank goes in front of Deskew rather than after it. A blank page gives
+    the angle search nothing to maximise, and deskew pads the canvas, which
+    would dilute the ink ratio the blank check reads.
     """
-    return [CropBorder(), Despeckle(), SplitSpread(), Deskew()]
+    return [CropBorder(), Despeckle(), SplitSpread(), DropBlank(), Deskew()]
