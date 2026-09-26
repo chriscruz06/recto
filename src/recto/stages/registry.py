@@ -13,6 +13,7 @@ from recto.stages.blank import DropBlank
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
 from recto.stages.deskew import Deskew
+from recto.stages.figures import MaskFigures
 from recto.stages.split import SplitSpread
 
 
@@ -31,5 +32,16 @@ def default_stages() -> list[Stage]:
     DropBlank goes in front of Deskew rather than after it. A blank page gives
     the angle search nothing to maximise, and deskew pads the canvas, which
     would dilute the ink ratio the blank check reads.
+
+    MaskFigures runs on the straightened page and before anything that reads
+    columns, because a headpiece spans both columns and fills the whitespace
+    valley the column split looks for.
     """
-    return [CropBorder(), Despeckle(), SplitSpread(), DropBlank(), Deskew()]
+    return [
+        CropBorder(),
+        Despeckle(),
+        SplitSpread(),
+        DropBlank(),
+        Deskew(),
+        MaskFigures(),
+    ]
