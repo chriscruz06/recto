@@ -18,10 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import FixturePage, load_fixtures
+from conftest import FixturePage, cleaned, load_fixtures
 from recto.frames import RECTO, VERSO
-from recto.stages.border import CropBorder
-from recto.stages.despeckle import Despeckle
 from recto.stages.gutter import find_gutter
 from recto.stages.split import SplitSpread
 
@@ -62,16 +60,15 @@ bound still fires if it grows."""
 
 
 def pipeline_to_split(page: FixturePage):
-    """Run the stages that come before the split, and report where the crop was.
+    """The spread as the split receives it, and where the crop was.
 
     The crop offset matters because findings describe the frame a stage was
     given: once CropBorder has cut, every column index downstream is relative to
-    the cropped image, and the expected values are relative to the page.
+    the cropped image, and the expected values are relative to the page. Cached
+    per session in conftest.cleaned, which is why the frame is only ever passed
+    to a stage's apply here and never run through a Pipeline.
     """
-    cropped = CropBorder().apply(page.frame())
-    offset = cropped.findings[0].shape.x
-    cleaned = Despeckle().apply(cropped.frames[0]).frames[0]
-    return cleaned, offset
+    return cleaned(page)
 
 
 @pytest.mark.parametrize("page", load_fixtures(), ids=str)

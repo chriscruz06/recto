@@ -15,14 +15,23 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from recto.frames import Frame, Provenance
+from recto.pipeline import Pipeline
 from recto.pngio import read_png
+from recto.stages.blank import DropBlank
+from recto.stages.border import CropBorder
+from recto.stages.despeckle import Despeckle
+from recto.stages.split import SplitSpread
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+FIGURE_DIR = FIXTURE_DIR / "figures"
 
 SOURCE_DPI = 300
 """The resolution the scan is at, and the one expected values are recorded in."""
@@ -97,3 +106,62 @@ def fixture_pages() -> list[FixturePage]:
             "Run: python tests/make_fixtures.py <path to the scan>"
         )
     return pages
+
+
+@lru_cache(maxsize=None)
+def cleaned(page: FixturePage) -> tuple[Frame, int]:
+    """The spread after crop and despeckle, and where the crop landed.
+
+    Computed once per session, because most tests start here and redoing it for
+    every parametrised case is most of what makes a suite slow. The offset is
+    the crop's left edge, which is what turns a column in the cleaned image
+    back into a column of the page. Callers must treat the frame as read only:
+    stages return new frames rather than changing their input, so calling apply
+    on it is safe, but running it through a Pipeline is not, because the
+    pipeline appends to each frame's history in place.
+    """
+    cropped = CropBorder().apply(page.frame())
+    offset = cropped.findings[0].shape.x
+    return Despeckle().apply(cropped.frames[0]).frames[0], offset
+
+
+@lru_cache(maxsize=None)
+def pages_of(page: FixturePage) -> dict[str, Frame]:
+    """The pages a fixture spread splits into, keyed by side, computed once.
+
+    What the deskew stage receives: split, and with a blank page dropped.
+    Read only, for the same reason as cleaned.
+    """
+    spread, _ = cleaned(page)
+    after_split = Pipeline([SplitSpread(), DropBlank()])
+    return {f.provenance.side: f for f in after_split.run(spread)}
+
+
+@dataclass(frozen=True)
+class FigureCrop:
+    """A 300 dpi crop of a straightened page, as the figure stage receives it."""
+
+    name: str
+    path: Path
+
+    def frame(self) -> Frame:
+        return Frame(
+            image=read_png(self.path),
+            provenance=Provenance(source=self.path, page_index=0, dpi=SOURCE_DPI),
+        )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+def load_figure_crops() -> list[FigureCrop]:
+    """Every figure crop on disk, in name order."""
+    return [
+        FigureCrop(name=path.stem, path=path)
+        for path in sorted(FIGURE_DIR.glob("*.png"))
+    ]
+
+
+def ink(image: np.ndarray) -> np.ndarray:
+    """The same test every stage uses."""
+    return image < 200
