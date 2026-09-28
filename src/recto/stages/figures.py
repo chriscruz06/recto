@@ -43,10 +43,26 @@ ten printed column rules, then checked against every page of the volume.
     lines 0.47 to 0.84, the page 12 block at 0.84. A blob too short to show a
     pitch is left to the row variation test, which catches those.
 
-The whole box is whited out, not the component's silhouette. Compared on the
-volume, the silhouette leaves a grey halo and fragments of the headpiece on
-page 1, and on the one case where the choice could have saved text, below, it
-loses exactly the same letters.
+What gets whited out is the figure's body, not its full bounding box. The
+binarisation welds type to anything it nearly touches, and on page 11 the tops
+of the first line under the decorated I, parts of liber, diximus and a bracket,
+are fused onto the foot of the woodcut. They become part of its component, so
+its bounding box runs 24 px down into the line, and whiting the box shaved up to
+a quarter of the ink off those words. The woodcut itself ends cleanly: about 500
+px of ink per row through its body, then 98, 57 and 26 in the rows that are only
+welded letter tops. So each box is trimmed back, row by row and column by
+column from its edges, until it reaches a line carrying at least BODY_FRACTION
+of the component's median line ink. Measured on 300 dpi crops of six figures
+and the type around them, 0.15 is the first level at which no piece of type
+loses any ink, and 0.20 is one step past it. The cost is at most 0.75 percent
+of a figure's own ink left outside its box as slivers. The same trim takes 46 px
+off the top of the title woodcut, where the line of type above its frame had
+been welded on the same way.
+
+Inside the body the whole rectangle is whited out, not the component's
+silhouette. Compared on the volume, the silhouette leaves a grey halo and
+fragments of the headpiece on page 1, and on the one case where the choice could
+have saved text, below, it loses exactly the same letters.
 
 Known behaviour, measured over all 148 pages:
 
@@ -93,6 +109,9 @@ MAX_LINE_PITCH = 0.42
 
 PITCH_RANGE = (35, 75)
 """Lags searched for a line pitch, in pixels at REFERENCE_DPI."""
+
+BODY_FRACTION = 0.20
+"""A box edge is trimmed until its line carries this share of the median line ink."""
 
 EDGE_TRIM = 0.10
 """Fraction of rows ignored at the top and bottom of a box when measuring it."""
@@ -161,6 +180,26 @@ def line_pitch(
     )
 
 
+def body_box(component: np.ndarray, fraction: float = BODY_FRACTION) -> Box:
+    """The part of a component's box that is the figure, not what is welded to it.
+
+    Rows and columns are trimmed from each edge until one carries at least
+    fraction of the component's median row or column ink. Coordinates are
+    relative to the component's own box.
+    """
+
+    def span(lines: np.ndarray) -> tuple[int, int]:
+        inked = lines[lines > 0]
+        if inked.size == 0:
+            return 0, len(lines)
+        keep = np.flatnonzero(lines >= fraction * float(np.median(inked)))
+        return int(keep[0]), int(keep[-1]) + 1
+
+    top, bottom = span(component.sum(axis=1))
+    left, right = span(component.sum(axis=0))
+    return Box(left, top, right - left, bottom - top)
+
+
 def outermost(boxes: list[Box]) -> list[Box]:
     """Drop any box that lies wholly inside another.
 
@@ -196,6 +235,7 @@ class MaskFigures:
         max_row_variation: float = MAX_ROW_VARIATION,
         max_line_pitch: float = MAX_LINE_PITCH,
         pitch_range: tuple[int, int] = PITCH_RANGE,
+        body_fraction: float = BODY_FRACTION,
         reference_dpi: int = REFERENCE_DPI,
     ) -> None:
         self.min_area = min_area
@@ -204,6 +244,7 @@ class MaskFigures:
         self.max_row_variation = max_row_variation
         self.max_line_pitch = max_line_pitch
         self.pitch_range = pitch_range
+        self.body_fraction = body_fraction
         self.reference_dpi = reference_dpi
 
     def figures(self, image: np.ndarray, dpi: int) -> list[Box]:
@@ -233,7 +274,11 @@ class MaskFigures:
             pitch = line_pitch(box, lags)
             if pitch is not None and pitch > self.max_line_pitch:
                 continue
-            found.append(Box(x, y, w, h))
+
+            # The tests above were measured on the full box, so they run on it.
+            # What gets whited out is the trimmed body.
+            inner = body_box(own, self.body_fraction)
+            found.append(Box(x + inner.x, y + inner.y, inner.width, inner.height))
         return outermost(found)
 
     def apply(self, frame: Frame) -> StageOutput:
