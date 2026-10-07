@@ -9,6 +9,7 @@ the same name and different jobs is a mistake waiting to happen.
 from __future__ import annotations
 
 from recto.pipeline import Stage
+from recto.stages.bands import BandLines
 from recto.stages.blank import DropBlank
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
@@ -36,6 +37,11 @@ def default_stages() -> list[Stage]:
     MaskFigures runs on the straightened page and before anything that reads
     columns, because a headpiece spans both columns and fills the whitespace
     valley the column split looks for.
+
+    BandLines runs on the masked page, because a woodcut left in place would be
+    banded as a block of very dark lines. It only measures: it draws the lines
+    of type it finds and passes the page on unchanged, and the stages that strip
+    the running head and the catchword will read the same bands.
     """
     return [
         CropBorder(),
@@ -44,4 +50,5 @@ def default_stages() -> list[Stage]:
         DropBlank(),
         Deskew(),
         MaskFigures(),
+        BandLines(),
     ]
