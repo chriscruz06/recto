@@ -136,8 +136,9 @@ def test_straightened_page_stays_straight() -> None:
 def test_cap_leaves_the_page_alone() -> None:
     """An estimate past the cap is treated as a failed estimate, not a tilt.
 
-    Nothing in the volume reaches the real cap of 2.5 degrees, so this lowers
-    it below a page that genuinely needs 1.2 and checks the stage declines.
+    Nothing in the four parts reaches the real cap of 4.0 degrees, so this
+    lowers it below a page that genuinely needs 1.2 and checks the stage
+    declines.
     """
     frame = pages_of(fixture(74))[RECTO]
     output = Deskew(cap=0.5).apply(frame)

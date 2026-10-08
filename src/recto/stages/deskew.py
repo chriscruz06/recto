@@ -15,12 +15,22 @@ halves of one spread differ by a median of 0.43 degrees and by as much as 2.00.
 A single rotation for the whole spread would straighten one page and bend the
 other by that much.
 
-Measurements behind the constants, over all 152 halves of the sample:
+Measurements behind the constants, over all 152 halves of the sample, and for
+SEARCH and CAP over the 555 page frames of all four parts:
 
-    SEARCH. The skew runs from -1.70 to +1.80 degrees, median magnitude 0.55,
-    and nothing reaches 2.0. Searching 3.0 either way is about 1.7 times the
-    worst page in the volume. Only 12 halves of 152 are already straight, so
-    this stage earns its cost on 92 percent of the book.
+    SEARCH. The skew in the sample runs from -1.70 to +1.80 degrees, median
+    magnitude 0.55, and only 12 halves of 152 are already straight, so this
+    stage earns its cost on 92 percent of the book. The held-out parts go
+    further: three consecutive rectos in part 2, p69 to p71, lean +2.75, +2.75
+    and +3.15, between neighbours at +2.20 and +2.25. Searching 4.5 either way
+    clears the steepest of them by 1.35 degrees and the cap by one coarse step,
+    which matters because the fine pass reaches only one coarse step past the
+    search: a page leaning further comes back as that edge value, and the edge
+    has to be past the cap so it is refused rather than rotated by the wrong
+    amount. The coarse pass is 37 rotations rather than 25. SEARCH stays a
+    multiple of COARSE, so the wider grid keeps every point the old one had,
+    and across all 555 page frames of the four parts the estimate at 4.5 is
+    identical to the one at 3.0, apart from the three pages above.
 
     SCORE_DPI. Scoring is the expensive part, and it does not need the full
     page. Scored at half resolution the chosen angle differs from the full
@@ -28,11 +38,19 @@ Measurements behind the constants, over all 152 halves of the sample:
     the range, at a third of the time. At a quarter it starts to drift, 0.45
     degrees out on the catalogue page.
 
-    CAP. Nothing in the sample needs more than 1.80 degrees, so an estimate
-    past 2.5 is not a tilted page, it is a page whose profile has no line
-    structure to find. Those are left alone and the summary says so, because a
-    2.9 degree rotation applied to a page that was straight is worse than no
-    correction at all.
+    CAP. An estimate past the cap is not taken as a tilted page but as a page
+    whose profile has no line structure to find, because a large rotation
+    applied to a page that was straight is worse than no correction at all.
+    The cap was 2.5, and it refused the three part 2 rectos above, whose
+    estimates are right: a 6 degree search returns the same three values, and
+    left tilted their lines merge two to four to a band. Before raising it,
+    every page frame of the four parts was estimated with a 6 degree search.
+    No page lands past 3.15, not even the flattest curves: the title page, the
+    openings of both indexes and of In Apocalypsim, and the tailpiece pages all
+    come back within 1.85 of straight. On the title page and the opening of
+    the Index rerum, the best angle beyond 3.5 still scores 12 and 13 percent
+    below the true peak. So the book offers no wrong answer to set the cap
+    against, and 4.0 leaves 0.85 degrees over the steepest real tilt.
 
     DEADBAND. The fine step is 0.05 degrees, so an estimate below that is not
     distinguishable from zero and the rotation is skipped: a resampling pass
@@ -60,7 +78,7 @@ import numpy as np
 from recto.frames import Finding, Frame, Line
 from recto.pipeline import StageOutput
 
-SEARCH = 3.0
+SEARCH = 4.5
 """Widest angle considered, in degrees either side of straight."""
 
 COARSE = 0.25
@@ -69,7 +87,7 @@ COARSE = 0.25
 FINE = 0.05
 """Second pass step, in degrees, over one coarse interval either side."""
 
-CAP = 2.5
+CAP = 4.0
 """An estimate beyond this is treated as a failed estimate, not a tilted page."""
 
 DEADBAND = 0.05
@@ -121,8 +139,8 @@ def estimate_angle(
     """Best angle for this mask, coarse pass then fine pass around the winner.
 
     Coarse to fine rather than one fine sweep because the variance curve has a
-    single broad maximum: 25 coarse steps land inside the right interval and 11
-    fine ones finish the job, against 121 steps for the same answer.
+    single broad maximum: 37 coarse steps land inside the right interval and 11
+    fine ones finish the job, against 181 steps for the same answer.
     """
     grid = np.arange(-search, search + 1e-9, coarse)
     best = float(grid[int(np.argmax([profile_variance(mask, a) for a in grid]))])
