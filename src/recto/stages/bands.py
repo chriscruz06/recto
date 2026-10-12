@@ -51,6 +51,16 @@ full line count as the catchword's peak, and one of the ten catchwords used to
 check this is lost; at 24 px two are, and twice as many heads split as at
 16 px.
 
+The rise and the smoothing were measured on the 260 body halves of the sample,
+against the head splits, the ten foot rows and the 27 noise bands labelled by
+eye. Neither brings back a noise band or loses a foot row anywhere from rise
+0.4 to 0.6 or smoothing 1 to 9 px. What they move is lines. A rise of 0.4 or
+0.45 merges four lines of the dark, fused p12 recto into one band, and 0.4
+merges three near the foot of the left half of p74 recto as well; 0.55 splits
+the head on 14 halves instead of 11, and 0.6 on 16. With no smoothing, two
+lines of p12 recto merge, and smoothing over 1 or 3 px splits the head on 13
+halves. 7 and 9 px do as well as 5 on every count, and 5 is the narrowest.
+
 Putting large type back together. Type bigger than the body has structure of
 its own: the tops of its capitals form a band, and so do the loops of its
 descenders. Three rules reassemble it. Bands closer than 12 px merge, which no
@@ -60,7 +70,7 @@ nearest line within 30 px. And a band under 40 percent of a neighbour's height,
 and closer to it than 30 percent of that height, is part of that neighbour.
 That last rule keeps the running head whole, and its 30 percent is held down by
 the first body line, which typically sits 37 to 40 px under a head 80 to 110 px
-tall. At 40 percent the first body line merges into the head on 54 of 260 half
+tall. At 40 percent the first body line merges into the head on 48 of 260 half
 pages, and would be stripped with it. The rule runs once over the bands as
 first found, because a band that grows by taking in a piece must not then reach
 for the next.
@@ -85,15 +95,23 @@ Known behaviour, over the 130 body pages of the sample:
 
     The running head comes out as two bands on 11 of 260 half pages, where the
     tops of its capitals make a band more than 40 percent the size of the rest.
-    The stage that strips the head takes everything above the head's gap, so
-    both pieces go.
+    Both pieces sit above the head's gap, but that gap alone does not find the
+    head: on the left of p18 recto a stroke along the top edge is banded above
+    a head only 51 px tall, which sits 14 px over the first body line.
+
+    One band holds two printed lines. On the left of p21 recto the word
+    surgere, ending a paragraph, sits close under its line and joins it. Of
+    the 22 body bands over 40 px tall, the other 21 hold one line or none:
+    large type, a heading, the library stamp on p31 recto, or the last line of
+    a paragraph, whose band runs on into the white beneath it.
 
     An ink blot 73 px under the last line of p21 recto is kept. Its run is
     36 px.
 
-    A catchword that is one narrow glyph, an ampersand on its own, would run
-    under 30 px and be lost. The one ampersand catchword in the sample shares
-    its row with the signature G 3 and survives.
+    A catchword narrower than 30 px, which is most single letters, would be
+    lost. Whether the sample has one was not checked. The lone ampersand
+    beside the signature G 3 on p49 recto is 36 px wide, so it would pass even
+    on its own.
 
 Banding a page costs about 0.15 s, most of it the connected component pass.
 """
