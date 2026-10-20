@@ -15,7 +15,7 @@ from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
 from recto.stages.deskew import Deskew
 from recto.stages.figures import MaskFigures
-from recto.stages.furniture import StripHead
+from recto.stages.furniture import StripFoot, StripHead
 from recto.stages.split import SplitSpread
 
 
@@ -43,9 +43,11 @@ def default_stages() -> list[Stage]:
     bands and a woodcut left in place would be banded as a block of very dark
     lines. It calls band_lines itself.
 
-    BandLines only measures: it draws the lines of type left after the head is
-    gone and passes the page on unchanged. It stays until the stage that strips
-    the catchword, which reads the same bands, replaces it.
+    StripFoot runs after StripHead. It reads the same line bands, and it must
+    not mistake the running head for a line of text.
+
+    BandLines only measures. It draws the lines of type that the column split
+    will get, and it passes the page on unchanged.
     """
     return [
         CropBorder(),
@@ -55,5 +57,6 @@ def default_stages() -> list[Stage]:
         Deskew(),
         MaskFigures(),
         StripHead(),
+        StripFoot(),
         BandLines(),
     ]

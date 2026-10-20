@@ -1,4 +1,4 @@
-"""Strip the running head and folio off the top of a page.
+"""Strip the running head off the top of a page, and the foot row off the bottom.
 
 Every body page of this book opens with one printed line in large type: the
 running head, with the folio number at its outer end. Versos read "D. Alberti
@@ -78,15 +78,64 @@ at 30, two front matter pages, and at 50, fourteen pages, mostly index pages,
 whose heads are set smaller and band at 45 to 50 px; LINE_MIN at 15 or 21, two
 or three pages; LINE_MAX from 30 to 40, none; GAP_MAX at 70, four pages, and at
 60, thirty-one; PIECE at 20 or 40, p18 recto or two index pages.
+
+The foot row (commit 15). Under the last line of a body page, the printer sets
+one more row. On a signed recto it holds the direction line "D. Alberti Magni,
+in Euang. D.Ioan." at the left, the signature, such as C 3, in the middle, and
+the catchword at the right. A verso holds the catchword only. The catchword
+repeats the first word of the next page. If OCR reads it, the translation gets
+that word two times, and no later step finds the error. So the stage removes
+the row, and all ink under it.
+
+The foot row starts away from the left edge of its column. A body line starts
+at the column edge, except the last line of a paragraph and an indented first
+line. Thus the stage examines the right half of the text block from the bottom
+up. A band is text when letter ink covers START_INK of the first START px of
+its column. The foot row is the first band in the run of non-text bands at the
+bottom. The column edge is the median left edge of bands wider than
+COLUMN_WIDE, which only full lines are.
+
+A band in that run is the foot row only if no text band of the left half is
+fully below it. This condition rejects the last lines of a chapter that ends
+early in the right column. On those pages the left column runs on, and the
+foot row is the band level with its last line. A horizontal cut cannot remove
+that row without the last line of the left column, so the stage keeps it. Six
+pages in parts 2 and 4 have this layout, with CAPVT or VISIO as catchword.
+
+The cut is halfway between the foot row and the lowest band above it. But the
+cut stays at least LINE_DEPTH under the top of each band that starts more than
+ABOVE over the foot row. Some last lines band together with the white under
+them, and a midpoint cut can then go into their descenders.
+
+Measured on all four parts, 555 page frames, every cut looked at:
+
+    The stage finds a foot row on 528 frames. In part 1 the cut is above all
+    ten foot rows that were labelled by eye in commit 13. It is also above the
+    blot on p21 recto and the library stamp on p31 recto, so they go too.
+
+    The 27 frames without a cut are front matter, index ends, blank ends, the
+    FINIS page, and the six chapter ends above. On part 2 p21 recto and part 4
+    p8 recto, the direction line in the left half is the lowest band, and the
+    right half has no band at that level. Their catchwords stay.
+
+    The foot row sits 0 to 71 px under the band above it, 24 at the median.
+
+Moving each constant one way and then the other: COLUMN_WIDE from 500 to 700
+changes no cut. START at 200 or 400 changes four or two frames. START_INK at
+0.03 or 0.08 changes three or four. ABOVE at 10 or 30 changes one or three.
+LINE_DEPTH at 30 or 40 moves the cut by 1 to 5 px on many pages, but the cut
+never passes the edge of a band.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from recto.frames import Box, Finding, Frame
 from recto.pipeline import StageOutput
-from recto.stages.bands import Band, band_lines
+from recto.stages.bands import Band, Tuning, band_lines, letter_ink
 
 HEAD_MIN = 40
 """Shortest band, in px, that can be the running head."""
@@ -102,6 +151,21 @@ GAP_MAX = 100
 
 PIECE = 30
 """Pieces of one head sit no further apart than this, in px."""
+
+COLUMN_WIDE = 600
+"""A band wider than this, in px, is a full line. Its left edge is the column edge."""
+
+START = 300
+"""Width in px, from the column edge, that tells a text line from the foot row."""
+
+START_INK = 0.05
+"""Share of letter ink in that width that makes a band a text line."""
+
+LINE_DEPTH = 35
+"""The foot cut stays this far, in px, under the top of each line above it."""
+
+ABOVE = 20
+"""A band that starts this far, in px, over the foot row is a line above it."""
 
 REFERENCE_DPI = 300
 """The resolution every length above is measured at."""
@@ -287,4 +351,159 @@ class StripHead:
             frames=[frame.derive(stripped)],
             findings=findings,
             summary=f"running head stripped, rows 0 to {head.cut}, banded in {sides}",
+        )
+
+
+def find_foot(
+    halves: tuple[list[Band], list[Band]],
+    letters: np.ndarray,
+    dpi: int,
+    *,
+    column_wide: int = COLUMN_WIDE,
+    start: int = START,
+    start_ink: float = START_INK,
+    line_depth: int = LINE_DEPTH,
+    above: int = ABOVE,
+    reference_dpi: int = REFERENCE_DPI,
+) -> tuple[int, Band] | None:
+    """Find the foot row and the row to cut the page at.
+
+    Args:
+        halves: Line bands of the left and right half, from band_lines.
+        letters: Letter ink mask of the same page, from letter_ink.
+        dpi: Resolution of the page.
+        column_wide: Width in px at REFERENCE_DPI of a full line.
+        start: Width in px at REFERENCE_DPI to examine from the column edge.
+        start_ink: Share of letter ink that makes a band a text line.
+        line_depth: Clearance in px at REFERENCE_DPI under each line top.
+        above: Distance in px at REFERENCE_DPI that makes a band a line above.
+        reference_dpi: Resolution the px values are given at.
+
+    Returns:
+        The cut row and the foot row band, or None if the page has no foot row
+        that a horizontal cut can remove.
+    """
+    scale = dpi / reference_dpi
+    column_wide, start, line_depth, above = (
+        max(1, round(v * scale)) for v in (column_wide, start, line_depth, above)
+    )
+
+    def column_edge(bands: list[Band]) -> int | None:
+        edges = [b.left for b in bands if b.width > column_wide]
+        return int(np.median(edges)) if edges else None
+
+    def is_text(b: Band, edge: int) -> bool:
+        window = letters[b.top : b.bottom, edge : edge + start]
+        return window.size > 0 and float(window.mean()) >= start_ink
+
+    left, right = halves
+    left_edge, right_edge = column_edge(left), column_edge(right)
+    if right_edge is None:
+        return None
+
+    first = len(right)
+    while first > 0 and not is_text(right[first - 1], right_edge):
+        first -= 1
+
+    text_left = [b for b in left if left_edge is not None and is_text(b, left_edge)]
+    for foot in right[first:]:
+        if any(b.top >= foot.bottom for b in text_left):
+            continue
+        bottoms = [b.bottom for bands in halves for b in bands if b.bottom <= foot.top]
+        if not bottoms:
+            return None
+        cut = (max(bottoms) + foot.top) // 2
+        floors = [
+            b.top + line_depth
+            for bands in halves
+            for b in bands
+            if b.top < foot.top - above
+        ]
+        return min(foot.top, max([cut, *floors])), foot
+    return None
+
+
+class StripFoot:
+    """White out the foot row and everything under it."""
+
+    name = "strip-foot"
+
+    def __init__(
+        self,
+        *,
+        column_wide: int = COLUMN_WIDE,
+        start: int = START,
+        start_ink: float = START_INK,
+        line_depth: int = LINE_DEPTH,
+        above: int = ABOVE,
+    ) -> None:
+        """Keep the constants for find_foot.
+
+        Args:
+            column_wide: Width in px at REFERENCE_DPI of a full line.
+            start: Width in px at REFERENCE_DPI to examine from the column edge.
+            start_ink: Share of letter ink that makes a band a text line.
+            line_depth: Clearance in px at REFERENCE_DPI under each line top.
+            above: Distance in px at REFERENCE_DPI that makes a band a line above.
+        """
+        self.column_wide = column_wide
+        self.start = start
+        self.start_ink = start_ink
+        self.line_depth = line_depth
+        self.above = above
+
+    def apply(self, frame: Frame) -> StageOutput:
+        """Remove the foot row from one page.
+
+        Args:
+            frame: A straightened page with figures masked and the head removed.
+
+        Returns:
+            The page with every row from the cut down made white, or the page
+            unchanged if it has no foot row.
+        """
+        dpi = frame.provenance.dpi
+        # The letter mask must match the one band_lines uses, so the same
+        # Tuning gives the area and stroke limits. A different mask would
+        # count speckle that banding ignores.
+        tuning = Tuning()
+        scale = dpi / REFERENCE_DPI
+        letters = letter_ink(
+            frame.image,
+            area=max(1, round(tuning.letter_area * scale**2)),
+            stroke_height=2 * max(1, round(tuning.pitch * scale)),
+            stroke_aspect=tuning.stroke_aspect,
+        )
+        halves = band_lines(frame.image, dpi, tuning)
+        found = find_foot(
+            halves,
+            letters,
+            dpi,
+            column_wide=self.column_wide,
+            start=self.start,
+            start_ink=self.start_ink,
+            line_depth=self.line_depth,
+            above=self.above,
+        )
+        if found is None:
+            return StageOutput(
+                frames=[frame], summary="no foot row found, left as is"
+            )
+
+        cut, foot = found
+        stripped = frame.image.copy()
+        stripped[cut:] = WHITE
+
+        findings = [
+            Finding(
+                "catchword",
+                Box(0, cut, frame.width, frame.height - cut),
+                note=f"cut at {cut}",
+            ),
+            Finding("text-line", Box(foot.left, foot.top, foot.width, foot.height)),
+        ]
+        return StageOutput(
+            frames=[frame.derive(stripped)],
+            findings=findings,
+            summary=f"foot row stripped, rows {cut} to {frame.height}",
         )
