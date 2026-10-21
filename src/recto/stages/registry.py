@@ -11,6 +11,7 @@ from __future__ import annotations
 from recto.pipeline import Stage
 from recto.stages.bands import BandLines
 from recto.stages.blank import DropBlank
+from recto.stages.columns import SplitColumns
 from recto.stages.border import CropBorder
 from recto.stages.despeckle import Despeckle
 from recto.stages.deskew import Deskew
@@ -48,6 +49,9 @@ def default_stages() -> list[Stage]:
 
     BandLines only measures. It draws the lines of type that the column split
     will get, and it passes the page on unchanged.
+
+    SplitColumns runs last. It must get a page with no head and no foot row,
+    because those lines go across both columns.
     """
     return [
         CropBorder(),
@@ -59,4 +63,5 @@ def default_stages() -> list[Stage]:
         StripHead(),
         StripFoot(),
         BandLines(),
+        SplitColumns(),
     ]
