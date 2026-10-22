@@ -32,6 +32,21 @@ actually receives, pages already split and straightened, because a tilt smears
 exactly the row structure the stage reads. That makes them depend on the stages
 before it: if the split or the deskew changes, regenerate. Nine crops, 0.8 MB.
 
+The foot row and the column split also need 300 dpi (commit 17). At 100 dpi the
+foot row merges with the last line on two of the 24 page frames, and the gap
+between the columns is 5 to 20 px, against CLEAR at 2. Two kinds of fixture:
+
+    Foot crops. Fourteen pages after mask-figures, cut from 300 rows above
+    the foot row, or above the last line of type, down to the bottom of the
+    page, full width. On all fourteen the bands under the first 100 rows of
+    the crop agree with the full page within 1 px, and strip-foot cuts at the
+    same row. The row where the crop starts is in the file name. 0.85 MB.
+
+    One column page. p41 recto as split-columns receives it, head and foot
+    already whited. It is a full page because the slant of the cut is fixed
+    by the length of the gap: on crops of ten lines an applied shear came
+    back up to 12 px per 1000 rows wrong. 0.56 MB.
+
 Run it from the repo root:
 
     python tests/make_fixtures.py C:/Users/cruz0/Desktop/part1.pdf
@@ -54,6 +69,8 @@ from recto.stages.blank import DropBlank
 from recto.stages.border import CropBorder
 from recto.stages.deskew import Deskew
 from recto.stages.despeckle import Despeckle
+from recto.stages.figures import MaskFigures
+from recto.stages.furniture import StripFoot, StripHead
 from recto.stages.split import SplitSpread
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -104,6 +121,39 @@ FIGURE_CROPS = {
                     "column rule broken up by speckle, 73 holes, must survive"),
 }
 """Name: (page label, (x0, y0, x1, y1) on the straightened page, why it is here)."""
+
+
+FOOT_DIR = FIXTURE_DIR / "foot"
+
+FOOT_CROPS = {
+    "p0012-verso": (3460, "catchword in, a single short word"),
+    "p0025-recto": (3460, "signature C 3 and catchword"),
+    "p0047-verso": (3430, "catchword in"),
+    "p0049-recto": (3410, "signature G 3 and a lone ampersand"),
+    "p0051-recto": (3390, "foot row, with noise labelled in both halves"),
+    "p0054-recto": (3390, "direction line, signature and catchword, 823 px wide"),
+    "p0059-verso": (3410, "catchword"),
+    "p0066-verso": (3420, "catchword"),
+    "p0071-verso": (3440, "catchword"),
+    "p0076-recto": (3480, "foot row 22 px under the last line"),
+    "p0019-recto": (3540, "speck and stroke under the foot row, right half"),
+    "p0034-verso": (3410, "speck row under the last line, left half"),
+    "p0069-recto": (3470, "stroke and speck under the catchword, right half"),
+    "p0071-recto": (3480, "stroke under the foot row, right half"),
+}
+"""Page label: (first row of the crop on the page, why it is here).
+
+The first ten carry the foot rows labelled by eye in commit 13. The last four
+carry noise that comes back as a band when the run floor drops to 20 or 22 px.
+Each crop starts 300 rows above the foot row or the last line, rounded down to
+ten."""
+
+COLUMN_DIR = FIXTURE_DIR / "columns"
+
+COLUMN_PAGE = "p0041-recto"
+"""The page for the column split. Of the part 1 body pages, it has the
+narrowest gap, 19 px, among the pages where a shear of 0.01 to 0.03 either way
+comes back exact to the step."""
 
 
 def fixture_path(page_number: int, dpi: int) -> Path:
@@ -158,6 +208,73 @@ def write_figure_crops(pdf: pdfium.PdfDocument) -> None:
         print(f"figures/{path.name}  {crop.shape[1]}x{crop.shape[0]}  {why}")
 
 
+def masked_pages(pdf: pdfium.PdfDocument, labels: set[str]) -> dict:
+    """Get each requested page as the strip-head stage receives it.
+
+    The stages are named here and not taken from the registry. Thus a stage
+    that a later commit adds does not change these fixtures.
+
+    Args:
+        pdf: The source scan.
+        labels: Page labels, such as p0012-verso.
+
+    Returns:
+        Each requested page after mask-figures, keyed by label.
+    """
+    before_head = Pipeline(
+        [
+            CropBorder(),
+            Despeckle(),
+            SplitSpread(),
+            DropBlank(),
+            Deskew(),
+            MaskFigures(),
+        ]
+    )
+    pages = {}
+    for number in sorted({int(label[1:5]) for label in labels}):
+        frame = Frame(
+            image=render_page(pdf[number - 1], DEFAULT_DPI),
+            provenance=Provenance(source=Path("scan"), page_index=number - 1),
+        )
+        for page in before_head.run(frame):
+            if page.provenance.label in labels:
+                pages[page.provenance.label] = page
+    return pages
+
+
+def write_foot_crops(pdf: pdfium.PdfDocument) -> None:
+    """Write the foot crops, each from its first row to the bottom of the page.
+
+    Args:
+        pdf: The source scan.
+    """
+    pages = masked_pages(pdf, set(FOOT_CROPS))
+    for label, (y0, why) in FOOT_CROPS.items():
+        crop = pages[label].image[y0:]
+        path = FOOT_DIR / f"{label}@{y0}.png"
+        write_png(path, np.where(crop < INK_BELOW, 0, 255).astype(np.uint8))
+        print(f"foot/{path.name}  {crop.shape[1]}x{crop.shape[0]}  {why}")
+
+
+def write_column_page(pdf: pdfium.PdfDocument) -> None:
+    """Write the column page as split-columns receives it.
+
+    The page is made bitonal before the head and the foot are found, because
+    the tests give the stages a bitonal page.
+
+    Args:
+        pdf: The source scan.
+    """
+    page = masked_pages(pdf, {COLUMN_PAGE})[COLUMN_PAGE]
+    page = page.derive(np.where(page.image < INK_BELOW, 0, 255).astype(np.uint8))
+    for stage in (StripHead(), StripFoot()):
+        page = stage.apply(page).frames[0]
+    path = COLUMN_DIR / f"{COLUMN_PAGE}.png"
+    write_png(path, page.image)
+    print(f"columns/{path.name}  {page.width}x{page.height}  head and foot whited")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", type=Path, help="the source scan, 300 dpi")
@@ -174,6 +291,8 @@ def main() -> None:
             write_png(path, small)
             print(f"{path.name}  {small.shape[1]}x{small.shape[0]}  {why}")
         write_figure_crops(pdf)
+        write_foot_crops(pdf)
+        write_column_page(pdf)
     finally:
         pdf.close()
 
