@@ -56,9 +56,14 @@ line in both. Everything above the cut is whited out across the full width:
 the head, the folio, and whatever scanner noise sat over them. A letter that
 the cut crosses is kept or removed whole, by stages/whole.py (commit 17a).
 
-Known failure, found in commit 17a: on three In Apocalypsim rectos of part 4,
-p4, p12 and p22, both halves band the head and the first body line as one
-band, and the cut falls under the first line, so that line is whited out.
+On three In Apocalypsim rectos of part 4, p4, p12 and p22, both halves band
+the head and the first body line as one band. A cut under that band whites out
+the first line. Over the 539 frames with a head, the shorter of the two head
+spans is at most 140 px, on part 2 p53 verso, where a ring over the O of Ord.
+reaches high. On the three pages it is 159 to 164 px. Thus at HEAD_TALL in
+both halves the cut goes up: to the row with the least letter ink from one
+pitch to LINE_MIN above the bottom of the band. On all three pages that row is
+in the white between the head and the first line (commit 17b).
 
 Measured on all four parts, 555 page frames, every one looked at:
 
@@ -135,7 +140,7 @@ never passes the edge of a band.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -158,6 +163,9 @@ GAP_MAX = 100
 
 PIECE = 30
 """Pieces of one head sit no further apart than this, in px."""
+
+HEAD_TALL = 150
+"""If the head is this tall, in px, in both halves, it holds the first line."""
 
 COLUMN_WIDE = 600
 """A band wider than this, in px, is a full line. Its left edge is the column edge."""
@@ -298,6 +306,31 @@ def _window(cut: int, height: int, dpi: int) -> tuple[int, int]:
     return max(0, cut - reach), min(height, cut + reach)
 
 
+def _first_line_gap(letters: np.ndarray, bottom: int, dpi: int) -> int:
+    """Find the row between the head and the first body line, in one joined band.
+
+    The first line is the last line of the band, so the search runs from one
+    line pitch to LINE_MIN above the bottom of the band.
+
+    Args:
+        letters: Letter ink mask of the page.
+        bottom: One past the last row of the band.
+        dpi: Resolution of the page.
+
+    Returns:
+        The row with the least letter ink. If more rows have that ink, the
+        middle of the first run of them.
+    """
+    scale = dpi / REFERENCE_DPI
+    top = max(0, bottom - max(1, round(Tuning().pitch * scale)))
+    end = max(top + 1, bottom - max(1, round(LINE_MIN * scale)))
+    ink = letters[top:end].sum(axis=1)
+    first = last = int(np.argmin(ink))
+    while last + 1 < ink.size and ink[last + 1] == ink[first]:
+        last += 1
+    return top + (first + last) // 2
+
+
 def _with_other(halves, found, h, rows, beside):
     """The head found in half h, checked against the other half."""
     top, bottom = rows[h]
@@ -347,9 +380,6 @@ class StripHead:
                 frames=[frame], summary="no running head found, left as is"
             )
 
-        # The head cut can go through the ascenders of the first body line
-        # and the descenders of the head. Each such letter is kept or removed
-        # whole, by the side of the cut it reaches further into.
         tuning = Tuning()
         scale = frame.provenance.dpi / REFERENCE_DPI
         letters = letter_ink(
@@ -358,6 +388,20 @@ class StripHead:
             stroke_height=2 * max(1, round(tuning.pitch * scale)),
             stroke_aspect=tuning.stroke_aspect,
         )
+
+        # When both halves band the head and the first body line together, the
+        # cut under that band would white out the first line. Then the cut goes
+        # up to the gap between the head and the line.
+        tall = max(1, round(HEAD_TALL * scale))
+        joined = all(span and span[1] - span[0] >= tall for span in head.halves)
+        if joined:
+            bottom = max(span[1] for span in head.halves)
+            gap = _first_line_gap(letters, bottom, frame.provenance.dpi)
+            head = replace(head, cut=gap)
+
+        # The head cut can go through the ascenders of the first body line
+        # and the descenders of the head. Each such letter is kept or removed
+        # whole, by the side of the cut it reaches further into.
         a, b = _window(head.cut, frame.height, frame.provenance.dpi)
         rows = head.cut - 0.5 - np.arange(a, b, dtype=float)[:, None]
         offset = np.broadcast_to(rows, (b - a, frame.width))
@@ -383,6 +427,9 @@ class StripHead:
                 continue
             top, bottom = span
             pieces = [b for b in bands if b.top < bottom and top < b.bottom]
+            if joined:
+                # Draw the head only, and not the first line that it holds.
+                bottom = head.cut
             left = min(b.left for b in pieces)
             right = max(b.right for b in pieces)
             findings.append(
@@ -390,10 +437,14 @@ class StripHead:
             )
 
         sides = "both halves" if all(head.halves) else "one half"
+        moved = ", cut moved up over the first line" if joined else ""
         return StageOutput(
             frames=[frame.derive(stripped)],
             findings=findings,
-            summary=f"running head stripped, rows 0 to {head.cut}, banded in {sides}",
+            summary=(
+                f"running head stripped, rows 0 to {head.cut}, "
+                f"banded in {sides}{moved}"
+            ),
         )
 
 

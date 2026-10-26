@@ -31,6 +31,9 @@ to 700 and START_INK from 0.005 to 0.3 have no test that fails. The stage
 docstring found that each of those changes at most four of 555 frames, and
 the fixtures hold none of them.
 
+Commit 17b adds HEAD_TALL. A test fails at 100, and none at 120 or 200: the
+three pages it is for are in part 4, which holds no fixtures.
+
 Commit 17a adds TALLEST in stages/whole.py. A test fails at 30 and 40, and none
 at 90 or 150: the fixtures hold no two lines fused into one piece. The stage
 docstring measures that on the four parts.
