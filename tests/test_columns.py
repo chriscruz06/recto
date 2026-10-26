@@ -11,7 +11,8 @@ Three oracles, none of them the stage under test.
 
     The letters. On a body page the cut must divide no letter. Each letter of
     the page must keep its ink in one column frame, to WHOLE. This runs at
-    300 dpi, on p41 recto and on the fourteen foot crops.
+    300 dpi, on p41 recto and on the fourteen foot crops. Thin upright pieces
+    are left out: they are the column rule, which the stage removes.
 
     A known shear. Shear p41 recto by a known slope, and the slope of the cut
     must change by that slope. The truth is the shear that this file applied,
@@ -32,6 +33,11 @@ SLANT 0.02, SLANT_STEP 0.001 and 0.004, SPLIT_MAX 0.15 and 0.45, TITLE_FIRST
 100 has no test that fails. The stage docstring found that CLEAR at 4 and the
 need for TITLE_TALL show on pages of parts 3 and 4, and the fixtures are all
 from part 1.
+
+Commit 17a adds UPRIGHT and WIDEST in stages/whole.py. A test fails at UPRIGHT
+1.2 and WIDEST 20, and none at UPRIGHT 4 or 100 or WIDEST 60 to 1000. Here the
+oracle leaves the rule pieces out, and no fused piece near the gap is wide.
+The stage docstring measures both on the four parts.
 """
 
 from __future__ import annotations
@@ -90,11 +96,16 @@ SLOPE_TOLERANCE = 0.002
 p41 recto: at most 0.0002, because the cut is drawn between whole pixels. A
 search step of 0.003 or 0.004 fails."""
 
-WHOLE = 0.95
+UPRIGHT = 2
+"""A piece this many times taller than wide is a piece of the column rule. The
+three such pieces that the split cuts on these pages were looked at, and all
+three are the rule."""
+
+WHOLE = 0.99
 """Share of its ink that each letter must keep in one column frame. Measured
-worst is 0.962. On 7 of the 15 pages, the whited gap takes 1 to 3 px columns
-off a letter at the edge of a column, 2 to 20 px of ink. The cause is not
-pinned down."""
+worst is 0.994, on p51 recto, where a letter touches the top edge of the crop.
+Before commit 17a it was 0.962: the gap took 1 to 3 px columns off a letter at
+the edge of a column, on 7 of the 15 pages."""
 
 
 def page_id(case: tuple[int, str]) -> str:
@@ -209,10 +220,11 @@ def test_every_letter_lands_whole_in_one_column(name: str) -> None:
     in_right = np.bincount(
         found.labels[:, offset:].ravel(), weights=right.ravel(), minlength=count
     )
-    area = found.stats[found.kept, 4]
-    share = np.maximum(in_left[found.kept], in_right[found.kept]) / area
+    width, height = found.stats[found.kept, 2], found.stats[found.kept, 3]
+    letter = found.kept[height < UPRIGHT * width]
+    share = np.maximum(in_left[letter], in_right[letter]) / found.stats[letter, 4]
     worst = int(np.argmin(share))
-    x, y = found.stats[found.kept[worst], :2]
+    x, y = found.stats[letter[worst], :2]
     assert share[worst] >= WHOLE, (
         f"{name}: letter at {x},{y} keeps {share[worst]:.0%} of its ink in one column"
     )

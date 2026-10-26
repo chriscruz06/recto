@@ -49,9 +49,11 @@ Measured on all four parts, every cut looked at:
     are cut wrongly.
 
 The cut keeps the full width of the clear gap white in both columns. Thus a
-printed rule in the gap goes, and the columns keep no ink of each other. If
-pieces of a broken rule count as letters, the gap is beside the rule, and the
-rule stays at the edge of one column.
+printed rule in the gap goes. If pieces of a broken rule count as letters, the
+gap is beside the rule, and the rule stays at the edge of one column. A letter
+that reaches into the gap goes whole to one column, by stages/whole.py (commit
+17a): an ascender or a descender outside the line bands, a hyphen, or a letter
+on one of the lines that the cut crosses.
 
 Moving each constant one way and then the other, over all four parts: REACH
 at 100, SLANT at 0.03 and SPLIT_MAX at 0.2 each change only part 3 p37 recto.
@@ -70,6 +72,7 @@ import numpy as np
 from recto.frames import Box, Finding, Frame, Line
 from recto.pipeline import StageOutput
 from recto.stages.bands import Tuning, band_lines, letter_ink, text_block
+from recto.stages.whole import UPRIGHT, WIDEST, whole_letters
 
 REACH = 150
 """Furthest the cut may be from the middle of the text block, in px."""
@@ -338,7 +341,7 @@ class SplitColumns:
             clean=self.title_clean,
         )
         top = (lines[n - 1][1] + lines[n][0]) // 2 if 0 < n < len(lines) else 0
-        return self._split(frame, cut, top)
+        return self._split(frame, cut, top, letters)
 
     def _whole(self, frame: Frame, summary: str) -> StageOutput:
         """Pass the page on as its only column.
@@ -358,6 +361,7 @@ class SplitColumns:
         frame: Frame,
         cut: Cut,
         top: int,
+        letters: np.ndarray,
     ) -> StageOutput:
         """Make the title frame, if any, and the two column frames.
 
@@ -365,6 +369,7 @@ class SplitColumns:
             frame: The page.
             cut: The cut between the columns.
             top: First row under the title block, 0 if there is none.
+            letters: Letter ink mask of the page.
 
         Returns:
             The frames in reading order, with findings and a summary.
@@ -376,13 +381,41 @@ class SplitColumns:
         half = cut.gap / 2
         cols = np.arange(width)[None, :]
 
-        # Each column keeps nothing from the gap. The gap has no letters on
-        # any line, so this removes only the rule and noise in it.
+        # Each column keeps nothing from the gap, which removes the rule and
+        # the noise in it. But a letter can reach into the gap: an ascender or
+        # a descender outside the line bands, or a letter on one of the few
+        # lines that the cut crosses. Such a letter goes whole to the column
+        # that it reaches further into. Thin upright pieces are the rule, and
+        # stay where the gap puts them.
         body = image[top:]
-        left = np.where(cols < (edge - half)[:, None], body, WHITE).astype(np.uint8)
-        right = np.where(cols > (edge + half)[:, None], body, WHITE).astype(np.uint8)
+        in_left = cols < (edge - half)[:, None]
+        in_right = cols > (edge + half)[:, None]
+        reach = max(1, round(WIDEST * frame.provenance.dpi / REFERENCE_DPI))
+        a = max(0, int(np.floor((edge - half).min())) - reach)
+        b = min(width, int(np.ceil((edge + half).max())) + reach)
+        to_left = np.zeros(body.shape, dtype=bool)
+        to_right = np.zeros(body.shape, dtype=bool)
+        to_left[:, a:b], to_right[:, a:b] = whole_letters(
+            letters[top:, a:b],
+            cols[:, a:b] - edge[:, None],
+            ~in_left[:, a:b] & ~in_right[:, a:b],
+            frame.provenance.dpi,
+            upright=UPRIGHT,
+        )
+        in_left = (in_left | to_left) & ~to_right
+        in_right = (in_right | to_right) & ~to_left
+        left = np.where(in_left, body, WHITE).astype(np.uint8)
+        right = np.where(in_right, body, WHITE).astype(np.uint8)
         left_end = int(np.ceil((edge - half).max()))
         right_start = int(np.floor((edge + half).min()))
+        # A letter that goes whole to a column can reach past the edge of the
+        # gap, so the frame grows to hold it.
+        if to_left.any():
+            last = int(np.flatnonzero(to_left.any(axis=0)).max())
+            left_end = max(left_end, last + 1)
+        if to_right.any():
+            first = int(np.flatnonzero(to_right.any(axis=0)).min())
+            right_start = min(right_start, first)
 
         frames, findings = [], []
         index = 0

@@ -53,7 +53,12 @@ because in 62 of 555 page frames one half bands the head and the first body
 line as one band, 273 to 444 on the left of p28 verso, while the other half
 keeps them apart. The half that keeps them apart puts the cut above the first
 line in both. Everything above the cut is whited out across the full width:
-the head, the folio, and whatever scanner noise sat over them.
+the head, the folio, and whatever scanner noise sat over them. A letter that
+the cut crosses is kept or removed whole, by stages/whole.py (commit 17a).
+
+Known failure, found in commit 17a: on three In Apocalypsim rectos of part 4,
+p4, p12 and p22, both halves band the head and the first body line as one
+band, and the cut falls under the first line, so that line is whited out.
 
 Measured on all four parts, 555 page frames, every one looked at:
 
@@ -85,7 +90,8 @@ in Euang. D.Ioan." at the left, the signature, such as C 3, in the middle, and
 the catchword at the right. A verso holds the catchword only. The catchword
 repeats the first word of the next page. If OCR reads it, the translation gets
 that word two times, and no later step finds the error. So the stage removes
-the row, and all ink under it.
+the row, and all ink under it. A letter that the cut crosses stays or goes
+whole, by stages/whole.py (commit 17a).
 
 The foot row starts away from the left edge of its column. A body line starts
 at the column edge, except the last line of a paragraph and an indented first
@@ -136,6 +142,7 @@ import numpy as np
 from recto.frames import Box, Finding, Frame
 from recto.pipeline import StageOutput
 from recto.stages.bands import Band, Tuning, band_lines, letter_ink
+from recto.stages.whole import TALLEST, whole_letters
 
 HEAD_MIN = 40
 """Shortest band, in px, that can be the running head."""
@@ -276,6 +283,21 @@ def find_head(
     return Head(cut=min(cuts), halves=(spans[0], spans[1]))
 
 
+def _window(cut: int, height: int, dpi: int) -> tuple[int, int]:
+    """Find the rows round a row cut that can hold a letter the cut crosses.
+
+    Args:
+        cut: The row of the cut.
+        height: Height of the page.
+        dpi: Resolution of the page.
+
+    Returns:
+        The first row of the window and one past its last row.
+    """
+    reach = max(1, round(TALLEST * dpi / REFERENCE_DPI)) + 1
+    return max(0, cut - reach), min(height, cut + reach)
+
+
 def _with_other(halves, found, h, rows, beside):
     """The head found in half h, checked against the other half."""
     top, bottom = rows[h]
@@ -325,8 +347,29 @@ class StripHead:
                 frames=[frame], summary="no running head found, left as is"
             )
 
+        # The head cut can go through the ascenders of the first body line
+        # and the descenders of the head. Each such letter is kept or removed
+        # whole, by the side of the cut it reaches further into.
+        tuning = Tuning()
+        scale = frame.provenance.dpi / REFERENCE_DPI
+        letters = letter_ink(
+            frame.image,
+            area=max(1, round(tuning.letter_area * scale**2)),
+            stroke_height=2 * max(1, round(tuning.pitch * scale)),
+            stroke_aspect=tuning.stroke_aspect,
+        )
+        a, b = _window(head.cut, frame.height, frame.provenance.dpi)
+        rows = head.cut - 0.5 - np.arange(a, b, dtype=float)[:, None]
+        offset = np.broadcast_to(rows, (b - a, frame.width))
+        kept, gone = whole_letters(
+            letters[a:b], offset, offset > 0, frame.provenance.dpi
+        )
+
         stripped = frame.image.copy()
         stripped[: head.cut] = WHITE
+        window = stripped[a:b]
+        window[kept] = frame.image[a:b][kept]
+        window[gone] = WHITE
 
         findings = [
             Finding(
@@ -491,8 +534,26 @@ class StripFoot:
             )
 
         cut, foot = found
+        # On most pages the descenders of the last line and the tops of the
+        # foot row share rows, so no row cut can separate them. Each letter
+        # that the cut touches stays or goes whole, by the side of the cut it
+        # reaches further into. Not by its ink: the cut can be near the
+        # baseline of the last line, and then most of a p is under it. Where
+        # the foot row is known, its top decides and not the cut. The cut can
+        # go through a catchword, and the long s of a catchword such as est
+        # reaches far above it.
+        a, b = _window(cut, frame.height, dpi)
+        rows = np.arange(a, b, dtype=float)[:, None]
+        offset = np.repeat(rows - cut + 0.5, frame.width, axis=1)
+        offset[:, foot.left : foot.right] = rows - foot.top + 0.5
+        whited = np.broadcast_to(rows >= cut, offset.shape)
+        kept, gone = whole_letters(letters[a:b], offset, whited, dpi)
+
         stripped = frame.image.copy()
         stripped[cut:] = WHITE
+        window = stripped[a:b]
+        window[kept] = frame.image[a:b][kept]
+        window[gone] = WHITE
 
         findings = [
             Finding(
