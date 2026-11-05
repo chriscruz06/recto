@@ -589,14 +589,24 @@ class StripFoot:
         # foot row share rows, so no row cut can separate them. Each letter
         # that the cut touches stays or goes whole, by the side of the cut it
         # reaches further into. Not by its ink: the cut can be near the
-        # baseline of the last line, and then most of a p is under it. Where
-        # the foot row is known, its top decides and not the cut. The cut can
-        # go through a catchword, and the long s of a catchword such as est
-        # reaches far above it.
+        # baseline of the last line, and then most of a p is under it. Over
+        # the foot row, the row halfway between it and the line above decides,
+        # and not the cut. The cut can go through a catchword, and the band of
+        # the foot row starts at the x-height, so the long s of a catchword
+        # such as est reaches far above the top of the band.
         a, b = _window(cut, frame.height, dpi)
         rows = np.arange(a, b, dtype=float)[:, None]
         offset = np.repeat(rows - cut + 0.5, frame.width, axis=1)
-        offset[:, foot.left : foot.right] = rows - foot.top + 0.5
+        over = [
+            band.bottom
+            for bands in halves
+            for band in bands
+            if band.bottom <= foot.top
+            and band.left < foot.right
+            and foot.left < band.right
+        ]
+        middle = (max(over, default=foot.top) + foot.top) / 2
+        offset[:, foot.left : foot.right] = rows - middle
         whited = np.broadcast_to(rows >= cut, offset.shape)
         kept, gone = whole_letters(letters[a:b], offset, whited, dpi)
 

@@ -49,8 +49,14 @@ module, as pieces of ink that come back or go:
 
     Foot: 1,686 pieces on 471 frames come back, the tails of the last line,
     and 810 pieces on 284 frames go, the tops of the foot row. Inside the
-    columns of the foot row, the top of the foot row decides, and not the
-    cut, which can go through a catchword.
+    columns of the foot row, a row near the foot row decides, and not the
+    cut, which can go through a catchword. Since commit 17c that row is
+    halfway between the foot row and the line above it, and not the top of
+    the foot row: the band of the foot row starts at the x-height, and the
+    long s of est on part 2 p66 recto reached 24 px above it, so the word
+    stayed. Against commit 17b this whites 9,610 px more on 42 frames, all of
+    it foot row: catchwords with a long s or an ampersand, tops of capitals,
+    and specks. Nothing comes back.
 
     Columns: 506 pieces come back: letters at the end of a column line,
     hyphens, and letters on the few lines that the cut crosses, which the gap
