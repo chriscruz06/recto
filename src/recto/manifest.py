@@ -11,14 +11,23 @@ page, the verso before the recto, and the columns left to right. A title block
 kept whole above the columns is column 0, so the column index is the reading
 order inside a page. A page that drop-blank skipped gets a row too, with no
 image, because the book has a page there and the manifest must account for it.
-Rows are written when a page is complete, so a later commit can resume a run
-by appending.
+A page where a stage failed gets one row with "status": "error" and the message
+in "error", and the run goes on to the next page.
+
+All rows of a page are written in one write, when the page is complete, and
+each row gives the number of rows of its page in "page_rows". A resumed run
+reads the manifest, keeps each page whose rows are all there and none failed,
+and skips those pages. It removes error rows, and rows of a page that a stopped
+run did not finish, and does those pages again. The pages it does are appended
+after the others, so after a resume the pages can be out of order. The rows of
+one page stay together and in reading order. Sort by "page" for the book order.
 
 Each row looks like this, with the stages shortened:
 
     {"image": "p0009-recto-c1.png", "label": "p0009-recto-c1",
      "source": "part1.pdf", "page": 9, "side": "recto", "column": 0,
-     "status": "column", "dpi": 300, "width": 1310, "height": 3650,
+     "status": "column", "dpi": 300, "page_rows": 4,
+     "width": 1310, "height": 3650,
      "stages": [{"stage": "crop-border", "frame": "p0009",
                  "summary": "...", "findings": [{"kind": "frame",
                  "box": [74, 6, 5780, 4410], "note": ""}]}, ...]}
@@ -121,24 +130,93 @@ def _finding(finding: Finding) -> dict[str, Any]:
     return {"kind": finding.kind, **where, "note": finding.note}
 
 
+def _stage(record: _Record) -> dict[str, Any]:
+    """Convert what one stage reported about one frame to a JSON object.
+
+    Args:
+        record: The stage, the frame label, the summary and the findings.
+
+    Returns:
+        An object with "stage", "frame", "summary" and "findings".
+    """
+    return {
+        "stage": record.stage,
+        "frame": record.frame,
+        "summary": record.summary,
+        "findings": [_finding(finding) for finding in record.findings],
+    }
+
+
+def _complete_rows(path: Path) -> list[dict[str, Any]]:
+    """Read the rows of the pages that an earlier run finished.
+
+    A page is finished when it has no error row and all of its page_rows rows
+    are there. A line that is not valid JSON is the last line of a run that
+    stopped while it wrote, and is left out.
+
+    Args:
+        path: The manifest file. It need not exist.
+
+    Returns:
+        The rows of the finished pages, in the order of the file.
+
+    Raises:
+        OSError: If the file exists but cannot be read.
+    """
+    if not path.exists():
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    count: dict[int, int] = {}
+    broken: set[int] = set()
+    for row in rows:
+        page = row.get("page")
+        count[page] = count.get(page, 0) + 1
+        # A row without page_rows was written before commit 20 and cannot say
+        # if its page is complete, so its page is done again.
+        if row.get("status") == "error" or "page_rows" not in row:
+            broken.add(page)
+    finished = {
+        row.get("page")
+        for row in rows
+        if row.get("page") not in broken and count[row.get("page")] == row["page_rows"]
+    }
+    return [row for row in rows if row.get("page") in finished]
+
+
 @dataclass
 class ManifestWriter:
     """Write column images and manifest rows, one page at a time.
 
     It is an Observer, so it sees what each stage reported without changing
     the run. Call page_done after each PDF page with the frames that the
-    pipeline returned. Use it as a context manager, so that the manifest file
-    is closed if a stage fails.
+    pipeline returned, or page_failed if a stage failed on it. Use it as a
+    context manager, so that the manifest file is closed if the run stops.
 
     Args:
         directory: The folder for the images and the manifest. It is made if
             it does not exist.
         blank: The drop-blank stage of the pipeline, which holds the pages it
             skipped. None if the pipeline has no such stage.
+        resume: Keep the complete pages of an earlier manifest and append to
+            it. If False, an earlier manifest is replaced.
     """
 
     directory: Path
     blank: DropBlank | None = None
+    resume: bool = False
+
+    done: set[int] = field(default_factory=set, init=False)
+    """One-based numbers of the pages complete in the manifest when opened."""
+
+    failed: int = field(default=0, init=False)
+    """Pages where a stage failed in this run."""
     rows: int = field(default=0, init=False)
     """Rows written so far, images and skipped pages together."""
 
@@ -155,7 +233,10 @@ class ManifestWriter:
         return self.directory / MANIFEST_NAME
 
     def __enter__(self) -> "ManifestWriter":
-        """Open the manifest for writing, and replace an old one.
+        """Open the manifest for writing.
+
+        Without resume, an earlier manifest is replaced. With resume, its
+        complete pages are kept and their numbers go in done.
 
         Returns:
             This writer.
@@ -164,7 +245,14 @@ class ManifestWriter:
             OSError: If the folder cannot be made or the file cannot be opened.
         """
         self.directory.mkdir(parents=True, exist_ok=True)
+        kept = _complete_rows(self.path) if self.resume else []
+        self.done = {row["page"] for row in kept}
         self._file = self.path.open("w", encoding="utf-8", newline="\n")
+        # The kept rows are written back first, so the error rows and the
+        # rows of an unfinished page are gone before new rows are appended.
+        lines = [json.dumps(row, ensure_ascii=False) + "\n" for row in kept]
+        self._file.write("".join(lines))
+        self._file.flush()
         if self.blank is not None:
             # Skips from an earlier run of the same stage object are not
             # this run's pages.
@@ -249,23 +337,68 @@ class ManifestWriter:
             units.append((skip.provenance.label, None, skip.ink, skip.provenance))
         units.sort(key=lambda unit: first_seen.get(unit[0], len(self._records)))
 
+        lines = []
         for _, frame, ink, provenance in units:
-            row = self._row(provenance, frame, ink)
+            row = self._row(provenance, frame, ink, len(units))
             if frame is not None:
                 write_png(self.directory / row["image"], frame.image)
                 self.images += 1
-            self._file.write(json.dumps(row, ensure_ascii=False) + "\n")
+            lines.append(json.dumps(row, ensure_ascii=False) + "\n")
+        # One write for the whole page. A run stopped during it leaves a page
+        # with fewer rows than page_rows, and a resume does that page again.
+        self._file.write("".join(lines))
         self._file.flush()
 
         self._records.clear()
         self.rows += len(units)
         return len(units)
 
+    def page_failed(self, provenance: Provenance, message: str) -> None:
+        """Write one error row for a page where a stage failed.
+
+        The row holds what the stages reported before the failure, so the
+        failing stage and the frame it failed on can be found.
+
+        Args:
+            provenance: The provenance of the spread frame of the page.
+            message: What went wrong, as the pipeline reported it.
+
+        Raises:
+            RuntimeError: If the writer is not open.
+        """
+        if self._file is None:
+            raise RuntimeError("ManifestWriter is not open; use it in a with block")
+        if self.blank is not None:
+            # A side skipped before the failure is not recorded: a resume does
+            # the whole page again.
+            self._skips_seen = len(self.blank.skipped)
+
+        row: dict[str, Any] = {
+            "image": None,
+            "label": provenance.label,
+            "source": str(provenance.source),
+            "page": provenance.page_number,
+            "side": None,
+            "column": None,
+            "status": "error",
+            "dpi": provenance.dpi,
+            "page_rows": 1,
+            "error": message,
+            "stages": [_stage(record) for record in self._records],
+        }
+        self._file.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self._file.flush()
+
+        self._records.clear()
+        self.rows += 1
+        self.failed += 1
+
     def _row(
         self,
         provenance: Provenance,
         frame: Frame | None,
         ink: float | None,
+        page_rows: int,
     ) -> dict[str, Any]:
         """Build the manifest row for one column image or one skipped page.
 
@@ -273,21 +406,13 @@ class ManifestWriter:
             provenance: Where the image or the skipped page came from.
             frame: The column frame, or None for a skipped page.
             ink: The ink share of a skipped page, or None for a column.
+            page_rows: The number of rows written for the page.
 
         Returns:
             The row as a JSON-ready dict.
         """
         lineage = _ancestors(provenance)
-        stages = [
-            {
-                "stage": record.stage,
-                "frame": record.frame,
-                "summary": record.summary,
-                "findings": [_finding(finding) for finding in record.findings],
-            }
-            for record in self._records
-            if record.frame in lineage
-        ]
+        stages = [_stage(record) for record in self._records if record.frame in lineage]
         row: dict[str, Any] = {
             "image": f"{provenance.label}.png" if frame is not None else None,
             "label": provenance.label,
@@ -297,6 +422,7 @@ class ManifestWriter:
             "column": provenance.column,
             "status": "column" if frame is not None else "blank",
             "dpi": provenance.dpi,
+            "page_rows": page_rows,
         }
         if frame is not None:
             row["width"] = frame.width

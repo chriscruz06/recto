@@ -8,6 +8,7 @@ without going through click.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import click
@@ -18,8 +19,14 @@ from recto.config import ProfileError, load_profile
 from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
 from recto.frames import Frame, Provenance
 from recto.manifest import DEFAULT_OUT_DIR, ManifestWriter
-from recto.pipeline import Observers, Pipeline
-from recto.raster import DEFAULT_CACHE, DEFAULT_DPI, native_dpi, rasterise
+from recto.pipeline import Observers, Pipeline, StageError
+from recto.raster import (
+    DEFAULT_CACHE,
+    DEFAULT_DPI,
+    native_dpi,
+    parse_page_range,
+    rasterise,
+)
 from recto.stages.blank import DropBlank
 from recto.stages.registry import default_stages
 
@@ -154,6 +161,14 @@ def raster_command(
     ),
 )
 @click.option(
+    "--resume",
+    is_flag=True,
+    help=(
+        "Keep the pages that an earlier run finished and do only the rest. "
+        "Pages that failed are done again. Use the same --dpi and --profile."
+    ),
+)
+@click.option(
     "--profile",
     "profile_path",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
@@ -171,6 +186,7 @@ def run_command(
     debug: bool,
     debug_dir: Path,
     out_dir: Path,
+    resume: bool,
     profile_path: Path | None,
 ) -> None:
     """Run the processing pipeline over the selected pages.
@@ -180,7 +196,9 @@ def run_command(
     and shrinks when a page turns out to be blank.
 
     Each column frame is written as a PNG, with one row in manifest.jsonl that
-    names its page, side and column and what each stage did to it.
+    names its page, side and column and what each stage did to it. If a stage
+    fails on a page, the page gets an error row, the run goes on, and the
+    command exits with status 1 at the end.
     """
     try:
         profile = load_profile(profile_path) if profile_path is not None else None
@@ -189,31 +207,93 @@ def run_command(
     pipeline = Pipeline(default_stages(profile))
     writer = DebugWriter(root=debug_dir) if debug else None
     blank = next((s for s in pipeline.stages if isinstance(s, DropBlank)), None)
-    manifest = ManifestWriter(directory=out_dir / pdf.stem, blank=blank)
-    observer = Observers([manifest, writer] if writer is not None else [manifest])
+    manifest = ManifestWriter(
+        directory=out_dir / pdf.stem, blank=blank, resume=resume
+    )
+    observer = Observers([manifest] if writer is None else [manifest, writer])
 
+    selected = _selected_pages(pdf, pages)
     produced = 0
+    started = time.monotonic()
     with manifest:
-        try:
-            for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
-                frame = Frame(
-                    image=page.image,
-                    provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
-                )
+        # Finished pages are taken out before rendering, so a resumed run does
+        # not read their cached images again.
+        todo = [index for index in selected if index + 1 not in manifest.done]
+        if resume:
+            click.echo(
+                f"resume: {len(selected) - len(todo)} page(s) already done "
+                f"in {manifest.path}, {len(todo)} to do"
+            )
+        # rasterise takes one-based page numbers, as --pages does.
+        spec = ",".join(str(index + 1) for index in todo)
+        # An empty spec would mean every page, so no pages to do means no call.
+        rendered = (
+            rasterise(pdf, pages=spec, dpi=dpi, out_dir=cache_dir) if todo else []
+        )
+        for count, page in enumerate(rendered, start=1):
+            frame = Frame(
+                image=page.image,
+                provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
+            )
+            tick = time.monotonic()
+            try:
                 results = pipeline.run(frame, observer=observer)
-                manifest.page_done(results)
-                click.echo(f"p{page.number:<5} {len(results)} frame(s) out")
-                produced += len(results)
-        except ValueError as exc:
-            raise click.BadParameter(str(exc), param_hint="--pages") from exc
+            except StageError as exc:
+                # One bad page must not stop a run of hundreds. The error row
+                # keeps the message, and --resume does the page again.
+                manifest.page_failed(frame.provenance, str(exc))
+                click.echo(f"p{page.number:<5} FAILED: {exc}", err=True)
+                continue
+            manifest.page_done(results)
+            produced += len(results)
+            click.echo(
+                f"p{page.number:<5} {len(results)} frame(s) out  "
+                f"[{count}/{len(todo)}, {time.monotonic() - tick:.1f} s]"
+            )
 
-    click.echo(f"{produced} frame(s) from {len(pipeline.stages)} stage(s)")
+    click.echo(
+        f"{produced} frame(s) from {len(pipeline.stages)} stage(s) "
+        f"in {time.monotonic() - started:.0f} s"
+    )
     click.echo(
         f"{manifest.images} image(s) and {manifest.rows} manifest row(s) "
-        f"under {manifest.directory}"
+        f"written under {manifest.directory}"
     )
+    if manifest.failed:
+        click.echo(
+            f"{manifest.failed} page(s) failed. Their rows in {manifest.path} "
+            "give the error. Run again with --resume to do them again.",
+            err=True,
+        )
+        raise SystemExit(1)
     if writer is not None:
         click.echo(f"{len(writer.written)} overlay(s) under {debug_dir}")
+
+
+def _selected_pages(source: Path, pages: str | None) -> list[int]:
+    """Give the zero-based indices of the pages that --pages selects.
+
+    Args:
+        source: The PDF.
+        pages: The --pages value, or None for every page.
+
+    Returns:
+        The indices, sorted.
+
+    Raises:
+        click.BadParameter: If the --pages value is not valid for this PDF.
+    """
+    pdf = pdfium.PdfDocument(source)
+    try:
+        count = len(pdf)
+    finally:
+        pdf.close()
+    if pages is None:
+        return list(range(count))
+    try:
+        return parse_page_range(pages, count)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--pages") from exc
 
 
 def _warn_if_upsampling(source: Path, dpi: int) -> None:
