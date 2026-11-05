@@ -291,39 +291,44 @@ def find_head(
     return Head(cut=min(cuts), halves=(spans[0], spans[1]))
 
 
-def _window(cut: int, height: int, dpi: int) -> tuple[int, int]:
+def _window(cut: int, height: int, dpi: int, tallest: int) -> tuple[int, int]:
     """Find the rows round a row cut that can hold a letter the cut crosses.
 
     Args:
         cut: The row of the cut.
         height: Height of the page.
         dpi: Resolution of the page.
+        tallest: Tallest letter that moves, in px at REFERENCE_DPI.
 
     Returns:
         The first row of the window and one past its last row.
     """
-    reach = max(1, round(TALLEST * dpi / REFERENCE_DPI)) + 1
+    reach = max(1, round(tallest * dpi / REFERENCE_DPI)) + 1
     return max(0, cut - reach), min(height, cut + reach)
 
 
-def _first_line_gap(letters: np.ndarray, bottom: int, dpi: int) -> int:
+def _first_line_gap(
+    letters: np.ndarray, bottom: int, dpi: int, pitch: int, line_min: int
+) -> int:
     """Find the row between the head and the first body line, in one joined band.
 
     The first line is the last line of the band, so the search runs from one
-    line pitch to LINE_MIN above the bottom of the band.
+    line pitch to line_min above the bottom of the band.
 
     Args:
         letters: Letter ink mask of the page.
         bottom: One past the last row of the band.
         dpi: Resolution of the page.
+        pitch: Body line pitch, in px at REFERENCE_DPI.
+        line_min: Shortest body line, in px at REFERENCE_DPI.
 
     Returns:
         The row with the least letter ink. If more rows have that ink, the
         middle of the first run of them.
     """
     scale = dpi / REFERENCE_DPI
-    top = max(0, bottom - max(1, round(Tuning().pitch * scale)))
-    end = max(top + 1, bottom - max(1, round(LINE_MIN * scale)))
+    top = max(0, bottom - max(1, round(pitch * scale)))
+    end = max(top + 1, bottom - max(1, round(line_min * scale)))
     ink = letters[top:end].sum(axis=1)
     first = last = int(np.argmin(ink))
     while last + 1 < ink.size and ink[last + 1] == ink[first]:
@@ -357,15 +362,34 @@ class StripHead:
         line_max: int = LINE_MAX,
         gap_max: int = GAP_MAX,
         piece: int = PIECE,
+        head_tall: int = HEAD_TALL,
+        tuning: Tuning = Tuning(),
+        tallest: int = TALLEST,
     ) -> None:
+        """Keep the constants for find_head and the cut.
+
+        Args:
+            head_min: Shortest band, in px, that can be the head.
+            line_min: Shortest band, in px, that is a body line.
+            line_max: Tallest band, in px, that is a body line.
+            gap_max: Furthest the first body line sits under the head, in px.
+            piece: Furthest apart, in px, two pieces of one head sit.
+            head_tall: Head height, in px, in both halves, that holds the
+                first line.
+            tuning: The constants for band_lines.
+            tallest: Tallest letter, in px, that the cut keeps whole.
+        """
         self.head_min = head_min
         self.line_min = line_min
         self.line_max = line_max
         self.gap_max = gap_max
         self.piece = piece
+        self.head_tall = head_tall
+        self.tuning = tuning
+        self.tallest = tallest
 
     def apply(self, frame: Frame) -> StageOutput:
-        halves = band_lines(frame.image, frame.provenance.dpi)
+        halves = band_lines(frame.image, frame.provenance.dpi, self.tuning)
         head = find_head(
             halves,
             frame.provenance.dpi,
@@ -380,7 +404,7 @@ class StripHead:
                 frames=[frame], summary="no running head found, left as is"
             )
 
-        tuning = Tuning()
+        tuning = self.tuning
         scale = frame.provenance.dpi / REFERENCE_DPI
         letters = letter_ink(
             frame.image,
@@ -392,21 +416,27 @@ class StripHead:
         # When both halves band the head and the first body line together, the
         # cut under that band would white out the first line. Then the cut goes
         # up to the gap between the head and the line.
-        tall = max(1, round(HEAD_TALL * scale))
+        tall = max(1, round(self.head_tall * scale))
         joined = all(span and span[1] - span[0] >= tall for span in head.halves)
         if joined:
             bottom = max(span[1] for span in head.halves)
-            gap = _first_line_gap(letters, bottom, frame.provenance.dpi)
+            gap = _first_line_gap(
+                letters, bottom, frame.provenance.dpi, tuning.pitch, self.line_min
+            )
             head = replace(head, cut=gap)
 
         # The head cut can go through the ascenders of the first body line
         # and the descenders of the head. Each such letter is kept or removed
         # whole, by the side of the cut it reaches further into.
-        a, b = _window(head.cut, frame.height, frame.provenance.dpi)
+        a, b = _window(head.cut, frame.height, frame.provenance.dpi, self.tallest)
         rows = head.cut - 0.5 - np.arange(a, b, dtype=float)[:, None]
         offset = np.broadcast_to(rows, (b - a, frame.width))
         kept, gone = whole_letters(
-            letters[a:b], offset, offset > 0, frame.provenance.dpi
+            letters[a:b],
+            offset,
+            offset > 0,
+            frame.provenance.dpi,
+            tallest=self.tallest,
         )
 
         stripped = frame.image.copy()
@@ -530,6 +560,8 @@ class StripFoot:
         start_ink: float = START_INK,
         line_depth: int = LINE_DEPTH,
         above: int = ABOVE,
+        tuning: Tuning = Tuning(),
+        tallest: int = TALLEST,
     ) -> None:
         """Keep the constants for find_foot.
 
@@ -539,12 +571,16 @@ class StripFoot:
             start_ink: Share of letter ink that makes a band a text line.
             line_depth: Clearance in px at REFERENCE_DPI under each line top.
             above: Distance in px at REFERENCE_DPI that makes a band a line above.
+            tuning: The constants for band_lines.
+            tallest: Tallest letter, in px, that the cut keeps whole.
         """
         self.column_wide = column_wide
         self.start = start
         self.start_ink = start_ink
         self.line_depth = line_depth
         self.above = above
+        self.tuning = tuning
+        self.tallest = tallest
 
     def apply(self, frame: Frame) -> StageOutput:
         """Remove the foot row from one page.
@@ -560,7 +596,7 @@ class StripFoot:
         # The letter mask must match the one band_lines uses, so the same
         # Tuning gives the area and stroke limits. A different mask would
         # count speckle that banding ignores.
-        tuning = Tuning()
+        tuning = self.tuning
         scale = dpi / REFERENCE_DPI
         letters = letter_ink(
             frame.image,
@@ -594,7 +630,7 @@ class StripFoot:
         # and not the cut. The cut can go through a catchword, and the band of
         # the foot row starts at the x-height, so the long s of a catchword
         # such as est reaches far above the top of the band.
-        a, b = _window(cut, frame.height, dpi)
+        a, b = _window(cut, frame.height, dpi, self.tallest)
         rows = np.arange(a, b, dtype=float)[:, None]
         offset = np.repeat(rows - cut + 0.5, frame.width, axis=1)
         over = [
@@ -608,7 +644,9 @@ class StripFoot:
         middle = (max(over, default=foot.top) + foot.top) / 2
         offset[:, foot.left : foot.right] = rows - middle
         whited = np.broadcast_to(rows >= cut, offset.shape)
-        kept, gone = whole_letters(letters[a:b], offset, whited, dpi)
+        kept, gone = whole_letters(
+            letters[a:b], offset, whited, dpi, tallest=self.tallest
+        )
 
         stripped = frame.image.copy()
         stripped[cut:] = WHITE

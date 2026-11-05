@@ -14,6 +14,7 @@ import click
 import pypdfium2 as pdfium
 
 from recto import __version__
+from recto.config import ProfileError, load_profile
 from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
 from recto.frames import Frame, Provenance
 from recto.pipeline import Pipeline
@@ -139,6 +140,16 @@ def raster_command(
     show_default=True,
     help="Where debug overlays are written.",
 )
+@click.option(
+    "--profile",
+    "profile_path",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    default=None,
+    help=(
+        "TOML file with the stage constants for a book. "
+        "Without it, the values measured on the Jammy edition apply."
+    ),
+)
 def run_command(
     pdf: Path,
     pages: str | None,
@@ -146,6 +157,7 @@ def run_command(
     cache_dir: Path,
     debug: bool,
     debug_dir: Path,
+    profile_path: Path | None,
 ) -> None:
     """Run the processing pipeline over the selected pages.
 
@@ -153,7 +165,11 @@ def run_command(
     so the frame count reported per page grows as splitting stages are added
     and shrinks when a page turns out to be blank.
     """
-    pipeline = Pipeline(default_stages())
+    try:
+        profile = load_profile(profile_path) if profile_path is not None else None
+    except ProfileError as exc:
+        raise click.BadParameter(str(exc), param_hint="--profile") from exc
+    pipeline = Pipeline(default_stages(profile))
     writer = DebugWriter(root=debug_dir) if debug else None
 
     produced = 0

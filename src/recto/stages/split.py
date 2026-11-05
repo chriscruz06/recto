@@ -48,7 +48,7 @@ import numpy as np
 
 from recto.frames import Box, Finding, Frame, Line, RECTO, VERSO
 from recto.pipeline import StageOutput
-from recto.stages.gutter import find_gutter
+from recto.stages.gutter import SEARCH_FRACTION, SMOOTH_WIDTH, find_gutter
 
 INSET = 32
 """Extra pixels trimmed past each band edge at REFERENCE_DPI, for the fringe."""
@@ -66,13 +66,34 @@ class SplitSpread:
         self,
         *,
         inset: int = INSET,
+        search_fraction: float = SEARCH_FRACTION,
+        smooth_width: int = SMOOTH_WIDTH,
         reference_dpi: int = REFERENCE_DPI,
     ) -> None:
+        """Keep the constants for the cut and for find_gutter.
+
+        The gutter search has no stage of its own, so its two constants come
+        in here, where a profile can set them.
+
+        Args:
+            inset: Shadow, in px at reference_dpi, cut off each side of the fold.
+            search_fraction: Share of the width each side of the middle that
+                find_gutter searches.
+            smooth_width: Smoothing, in px at reference_dpi, for find_gutter.
+            reference_dpi: Resolution the px values are given at.
+        """
         self.inset = inset
+        self.search_fraction = search_fraction
+        self.smooth_width = smooth_width
         self.reference_dpi = reference_dpi
 
     def apply(self, frame: Frame) -> StageOutput:
-        gutter = find_gutter(frame.image, frame.provenance.dpi)
+        gutter = find_gutter(
+            frame.image,
+            frame.provenance.dpi,
+            search_fraction=self.search_fraction,
+            smooth_width=self.smooth_width,
+        )
         width = frame.width
         inset = round(self.inset * frame.provenance.dpi / self.reference_dpi)
 

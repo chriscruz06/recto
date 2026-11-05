@@ -1,0 +1,105 @@
+# Profile for the Jammy edition, Lyons 1651, Operum Tomus Undecimus.
+#
+# Every value here was measured on this scan, at 300 dpi. Each is the default
+# in the code, so this file changes nothing: it shows every section and key
+# that a profile for another book can set. Lengths are px at 300 dpi; the
+# stages scale them to the page's own resolution. The measurement behind each
+# value is in the docstring of the module named over its section.
+#
+# Use it with:  recto run book.pdf --profile profiles/jammy-1651.toml
+
+# src/recto/stages/border.py
+[crop-border]
+run_fraction = 0.15
+dark_fraction = 0.5
+search_fraction = 0.15
+inset = 8
+
+# src/recto/stages/despeckle.py
+[despeckle]
+min_area = 16
+
+# src/recto/stages/split.py, and gutter.py for search_fraction and smooth_width
+[split-spread]
+inset = 32
+search_fraction = 0.12
+smooth_width = 16
+
+# src/recto/stages/blank.py
+[drop-blank]
+max_ink = 0.01
+edge_area = 2000
+
+# src/recto/stages/deskew.py
+[deskew]
+search = 4.5
+coarse = 0.25
+fine = 0.05
+cap = 4.0
+deadband = 0.05
+score_dpi = 150
+
+# src/recto/stages/figures.py
+[mask-figures]
+min_area = 15000
+max_aspect = 16.0
+min_holes = 40
+max_row_variation = 0.35
+max_line_pitch = 0.42
+pitch_range = [35, 75]
+body_fraction = 0.2
+edge_trim = 0.1
+
+# src/recto/stages/bands.py, Tuning. Shared by band-lines, strip-head,
+# strip-foot and split-columns, which must band lines the same way.
+[bands]
+letter_area = 90
+stroke_aspect = 4.0
+pitch = 48
+smooth = 5
+peak_reach = 16
+rise = 0.5
+merge_gap = 12
+sliver = 14
+fold_reach = 30
+piece_height = 0.4
+piece_gap = 0.3
+min_run = 30
+bridge = 10
+full_run = 100
+block_fraction = 0.25
+block_gap = 150
+
+# src/recto/stages/furniture.py, the running head
+[strip-head]
+head_min = 40
+line_min = 18
+line_max = 35
+gap_max = 100
+piece = 30
+head_tall = 150
+
+# src/recto/stages/furniture.py, the foot row
+[strip-foot]
+column_wide = 600
+start = 300
+start_ink = 0.05
+line_depth = 35
+above = 20
+
+# src/recto/stages/columns.py
+[split-columns]
+reach = 150
+clear = 6
+slant = 0.04
+slant_step = 0.002
+split_max = 0.3
+title_first = 4
+title_tall = 40
+title_clean = 8
+
+# src/recto/stages/whole.py. Shared by the head, foot and column cuts.
+[whole]
+tallest = 60
+widest = 300
+upright = 2.0

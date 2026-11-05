@@ -72,7 +72,7 @@ import numpy as np
 from recto.frames import Box, Finding, Frame, Line
 from recto.pipeline import StageOutput
 from recto.stages.bands import Tuning, band_lines, letter_ink, text_block
-from recto.stages.whole import UPRIGHT, WIDEST, whole_letters
+from recto.stages.whole import TALLEST, UPRIGHT, WIDEST, whole_letters
 
 REACH = 150
 """Furthest the cut may be from the middle of the text block, in px."""
@@ -263,6 +263,10 @@ class SplitColumns:
         title_first: int = TITLE_FIRST,
         title_tall: int = TITLE_TALL,
         title_clean: int = TITLE_CLEAN,
+        tuning: Tuning = Tuning(),
+        tallest: int = TALLEST,
+        widest: int = WIDEST,
+        upright: float = UPRIGHT,
     ) -> None:
         """Keep the constants for the search.
 
@@ -275,6 +279,10 @@ class SplitColumns:
             title_first: A title must start in this many first lines.
             title_tall: Shortest crossing line in px at 300 dpi for a title.
             title_clean: This many uncrossed lines in a row end a title.
+            tuning: The constants for band_lines.
+            tallest: Tallest letter, in px, that the gap keeps whole.
+            widest: Reach, in px, of the window round the gap.
+            upright: A piece this many times taller than wide is the rule.
         """
         self.reach = reach
         self.clear = clear
@@ -284,6 +292,10 @@ class SplitColumns:
         self.title_first = title_first
         self.title_tall = title_tall
         self.title_clean = title_clean
+        self.tuning = tuning
+        self.tallest = tallest
+        self.widest = widest
+        self.upright = upright
 
     def apply(self, frame: Frame) -> StageOutput:
         """Split one page into frames, in reading order.
@@ -303,7 +315,7 @@ class SplitColumns:
 
         # The same mask that band_lines uses, so that a line and its letters
         # agree. A mask with speckle would put ink in every gap.
-        tuning = Tuning()
+        tuning = self.tuning
         letters = letter_ink(
             frame.image,
             area=max(1, round(tuning.letter_area * scale**2)),
@@ -390,7 +402,7 @@ class SplitColumns:
         body = image[top:]
         in_left = cols < (edge - half)[:, None]
         in_right = cols > (edge + half)[:, None]
-        reach = max(1, round(WIDEST * frame.provenance.dpi / REFERENCE_DPI))
+        reach = max(1, round(self.widest * frame.provenance.dpi / REFERENCE_DPI))
         a = max(0, int(np.floor((edge - half).min())) - reach)
         b = min(width, int(np.ceil((edge + half).max())) + reach)
         to_left = np.zeros(body.shape, dtype=bool)
@@ -400,7 +412,8 @@ class SplitColumns:
             cols[:, a:b] - edge[:, None],
             ~in_left[:, a:b] & ~in_right[:, a:b],
             frame.provenance.dpi,
-            upright=UPRIGHT,
+            tallest=self.tallest,
+            upright=self.upright,
         )
         in_left = (in_left | to_left) & ~to_right
         in_right = (in_right | to_right) & ~to_left

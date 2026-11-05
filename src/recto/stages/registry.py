@@ -8,8 +8,10 @@ the same name and different jobs is a mistake waiting to happen.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from recto.pipeline import Stage
-from recto.stages.bands import BandLines
+from recto.stages.bands import BandLines, Tuning
 from recto.stages.blank import DropBlank
 from recto.stages.columns import SplitColumns
 from recto.stages.border import CropBorder
@@ -19,8 +21,13 @@ from recto.stages.figures import MaskFigures
 from recto.stages.furniture import StripFoot, StripHead
 from recto.stages.split import SplitSpread
 
+if TYPE_CHECKING:
+    # Only for the annotation: config imports the stage modules, so an import
+    # at run time would go in a circle.
+    from recto.config import Profile
 
-def default_stages() -> list[Stage]:
+
+def default_stages(profile: Profile | None = None) -> list[Stage]:
     """Build the pipeline as it currently stands.
 
     CropBorder runs first because everything after it measures ink, and the
@@ -52,16 +59,39 @@ def default_stages() -> list[Stage]:
 
     SplitColumns runs last. It must get a page with no head and no foot row,
     because those lines go across both columns.
+
+    Args:
+        profile: Values that change the defaults, from config.load_profile.
+            Without one, every stage keeps its defaults, which are the values
+            measured on the Jammy edition.
+
+    Returns:
+        The stages, in the order they run.
     """
+
+    def own(name: str) -> dict:
+        """Give the values the profile sets in one section.
+
+        Args:
+            name: The section name.
+
+        Returns:
+            A new dict, empty if there is no profile or it sets nothing there.
+        """
+        return profile.section(name) if profile is not None else {}
+
+    tuning = Tuning(**own("bands"))
+    whole = own("whole")
+    tallest = {key: value for key, value in whole.items() if key == "tallest"}
     return [
-        CropBorder(),
-        Despeckle(),
-        SplitSpread(),
-        DropBlank(),
-        Deskew(),
-        MaskFigures(),
-        StripHead(),
-        StripFoot(),
-        BandLines(),
-        SplitColumns(),
+        CropBorder(**own("crop-border")),
+        Despeckle(**own("despeckle")),
+        SplitSpread(**own("split-spread")),
+        DropBlank(**own("drop-blank")),
+        Deskew(**own("deskew")),
+        MaskFigures(**own("mask-figures")),
+        StripHead(**own("strip-head"), tuning=tuning, **tallest),
+        StripFoot(**own("strip-foot"), tuning=tuning, **tallest),
+        BandLines(tuning),
+        SplitColumns(**own("split-columns"), tuning=tuning, **whole),
     ]

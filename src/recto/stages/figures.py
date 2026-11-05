@@ -236,8 +236,22 @@ class MaskFigures:
         max_line_pitch: float = MAX_LINE_PITCH,
         pitch_range: tuple[int, int] = PITCH_RANGE,
         body_fraction: float = BODY_FRACTION,
+        edge_trim: float = EDGE_TRIM,
         reference_dpi: int = REFERENCE_DPI,
     ) -> None:
+        """Keep the constants for the five figure tests.
+
+        Args:
+            min_area: Smallest figure, in square px at reference_dpi.
+            max_aspect: Longest side over shortest side, at most.
+            min_holes: Fewest holes a figure has.
+            max_row_variation: Most row ink variation a figure has.
+            max_line_pitch: Most line pitch strength a figure has.
+            pitch_range: Line pitches tried, in px at reference_dpi.
+            body_fraction: Share of median line ink that trims a box.
+            edge_trim: Share of rows left out at each edge of a box.
+            reference_dpi: Resolution the px values are given at.
+        """
         self.min_area = min_area
         self.max_aspect = max_aspect
         self.min_holes = min_holes
@@ -245,6 +259,7 @@ class MaskFigures:
         self.max_line_pitch = max_line_pitch
         self.pitch_range = pitch_range
         self.body_fraction = body_fraction
+        self.edge_trim = edge_trim
         self.reference_dpi = reference_dpi
 
     def figures(self, image: np.ndarray, dpi: int) -> list[Box]:
@@ -269,9 +284,9 @@ class MaskFigures:
             if count_holes(own) < self.min_holes:
                 continue
             box = ink[y : y + h, x : x + w]
-            if row_variation(box) > self.max_row_variation:
+            if row_variation(box, self.edge_trim) > self.max_row_variation:
                 continue
-            pitch = line_pitch(box, lags)
+            pitch = line_pitch(box, lags, self.edge_trim)
             if pitch is not None and pitch > self.max_line_pitch:
                 continue
 
