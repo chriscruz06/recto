@@ -17,8 +17,10 @@ from recto import __version__
 from recto.config import ProfileError, load_profile
 from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
 from recto.frames import Frame, Provenance
-from recto.pipeline import Pipeline
+from recto.manifest import DEFAULT_OUT_DIR, ManifestWriter
+from recto.pipeline import Observers, Pipeline
 from recto.raster import DEFAULT_CACHE, DEFAULT_DPI, native_dpi, rasterise
+from recto.stages.blank import DropBlank
 from recto.stages.registry import default_stages
 
 # Accept -h as well as --help. Click only accepts --help by default, and
@@ -141,6 +143,17 @@ def raster_command(
     help="Where debug overlays are written.",
 )
 @click.option(
+    "--out",
+    "out_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_OUT_DIR,
+    show_default=True,
+    help=(
+        "Where column images and manifest.jsonl are written, in a folder "
+        "named after the PDF. A manifest from an earlier run is replaced."
+    ),
+)
+@click.option(
     "--profile",
     "profile_path",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
@@ -157,6 +170,7 @@ def run_command(
     cache_dir: Path,
     debug: bool,
     debug_dir: Path,
+    out_dir: Path,
     profile_path: Path | None,
 ) -> None:
     """Run the processing pipeline over the selected pages.
@@ -164,6 +178,9 @@ def run_command(
     Each page starts as one frame holding the whole spread. Stages narrow it,
     so the frame count reported per page grows as splitting stages are added
     and shrinks when a page turns out to be blank.
+
+    Each column frame is written as a PNG, with one row in manifest.jsonl that
+    names its page, side and column and what each stage did to it.
     """
     try:
         profile = load_profile(profile_path) if profile_path is not None else None
@@ -171,21 +188,30 @@ def run_command(
         raise click.BadParameter(str(exc), param_hint="--profile") from exc
     pipeline = Pipeline(default_stages(profile))
     writer = DebugWriter(root=debug_dir) if debug else None
+    blank = next((s for s in pipeline.stages if isinstance(s, DropBlank)), None)
+    manifest = ManifestWriter(directory=out_dir / pdf.stem, blank=blank)
+    observer = Observers([manifest, writer] if writer is not None else [manifest])
 
     produced = 0
-    try:
-        for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
-            frame = Frame(
-                image=page.image,
-                provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
-            )
-            results = pipeline.run(frame, observer=writer)
-            click.echo(f"p{page.number:<5} {len(results)} frame(s) out")
-            produced += len(results)
-    except ValueError as exc:
-        raise click.BadParameter(str(exc), param_hint="--pages") from exc
+    with manifest:
+        try:
+            for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
+                frame = Frame(
+                    image=page.image,
+                    provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
+                )
+                results = pipeline.run(frame, observer=observer)
+                manifest.page_done(results)
+                click.echo(f"p{page.number:<5} {len(results)} frame(s) out")
+                produced += len(results)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="--pages") from exc
 
     click.echo(f"{produced} frame(s) from {len(pipeline.stages)} stage(s)")
+    click.echo(
+        f"{manifest.images} image(s) and {manifest.rows} manifest row(s) "
+        f"under {manifest.directory}"
+    )
     if writer is not None:
         click.echo(f"{len(writer.written)} overlay(s) under {debug_dir}")
 

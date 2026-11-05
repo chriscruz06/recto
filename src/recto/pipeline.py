@@ -102,7 +102,7 @@ class Pipeline:
 class Observer(Protocol):
     """Watches every stage application without affecting the result.
 
-    The debug writer is the only implementation for now. Keeping it a protocol
+    The debug writer and the manifest writer implement it. Keeping it a protocol
     rather than wiring the writer straight into Pipeline means a normal run
     carries no debug machinery at all, and a future progress bar or profiler
     can hook the same point.
@@ -115,3 +115,33 @@ class Observer(Protocol):
         incoming: Frame,
         output: StageOutput,
     ) -> None: ...
+
+
+@dataclass
+class Observers:
+    """Pass each stage application to several observers, in order.
+
+    Pipeline.run takes one observer. A run with --debug needs two, the debug
+    writer and the manifest writer, and this joins them without a change to
+    the runner.
+    """
+
+    members: list[Observer]
+
+    def saw(
+        self,
+        order: int,
+        stage: Stage,
+        incoming: Frame,
+        output: StageOutput,
+    ) -> None:
+        """Observer hook. Give the stage application to each member.
+
+        Args:
+            order: The position of the stage in the pipeline, from 1.
+            stage: The stage that ran.
+            incoming: The frame that the stage was given.
+            output: What the stage returned.
+        """
+        for member in self.members:
+            member.saw(order, stage, incoming, output)
