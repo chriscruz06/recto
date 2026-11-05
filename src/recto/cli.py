@@ -16,9 +16,10 @@ import pypdfium2 as pdfium
 
 from recto import __version__
 from recto.config import ProfileError, load_profile
-from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter
+from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter, draw_overlay
 from recto.frames import Frame, Provenance
 from recto.manifest import DEFAULT_OUT_DIR, ManifestWriter
+from recto.pngio import write_png
 from recto.pipeline import Observers, Pipeline, StageError
 from recto.raster import (
     DEFAULT_CACHE,
@@ -28,6 +29,7 @@ from recto.raster import (
     rasterise,
 )
 from recto.stages.blank import DropBlank
+from recto.sheet import write_sheet
 from recto.stages.registry import default_stages
 
 # Accept -h as well as --help. Click only accepts --help by default, and
@@ -270,18 +272,138 @@ def run_command(
         click.echo(f"{len(writer.written)} overlay(s) under {debug_dir}")
 
 
-def _selected_pages(source: Path, pages: str | None) -> list[int]:
-    """Give the zero-based indices of the pages that --pages selects.
+@main.command("debug")
+@click.argument(
+    "pdf",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+)
+@click.option(
+    "--page",
+    type=click.IntRange(min=1),
+    required=True,
+    help="The page to show, one-based, as a PDF viewer numbers it.",
+)
+@click.option(
+    "--dpi",
+    type=click.IntRange(72, 1200),
+    default=DEFAULT_DPI,
+    show_default=True,
+    help="Render resolution.",
+)
+@click.option(
+    "--cache",
+    "cache_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_CACHE,
+    show_default=True,
+    help="Cache directory for rendered pages.",
+)
+@click.option(
+    "--debug-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_DEBUG_DIR,
+    show_default=True,
+    help="Where the overlays and the HTML page are written.",
+)
+@click.option(
+    "--profile",
+    "profile_path",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    default=None,
+    help=(
+        "TOML file with the stage constants for a book. "
+        "Without it, the values measured on the Jammy edition apply."
+    ),
+)
+@click.option(
+    "--no-open",
+    is_flag=True,
+    help="Write the HTML page but do not open it in the browser.",
+)
+def debug_command(
+    pdf: Path,
+    page: int,
+    dpi: int,
+    cache_dir: Path,
+    debug_dir: Path,
+    profile_path: Path | None,
+    no_open: bool,
+) -> None:
+    """Show every stage of one spread on one HTML page.
+
+    Runs the pipeline over one page with overlays on, then writes an HTML page
+    beside the overlays that shows the spread stages, the verso and the recto
+    next to each other stage by stage, and the frames that came out. Column
+    images and the manifest are not written.
+    """
+    try:
+        profile = load_profile(profile_path) if profile_path is not None else None
+    except ProfileError as exc:
+        raise click.BadParameter(str(exc), param_hint="--profile") from exc
+    (index,) = _selected_pages(pdf, str(page), hint="--page")
+    pipeline = Pipeline(default_stages(profile))
+    writer = DebugWriter(root=debug_dir)
+
+    (raster,) = rasterise(pdf, pages=str(page), dpi=dpi, out_dir=cache_dir)
+    frame = Frame(
+        image=raster.image,
+        provenance=Provenance(source=pdf, page_index=index, dpi=dpi),
+    )
+    folder = debug_dir / pdf.stem
+    error = None
+    results: list[Frame] = []
+    try:
+        results = pipeline.run(frame, observer=writer)
+    except StageError as exc:
+        # The overlays written before the failure are what shows where the page
+        # went wrong, so the sheet is still written.
+        error = str(exc)
+
+    outputs = []
+    for result in results:
+        label = result.provenance.label
+        picture = draw_overlay(
+            result.image,
+            [],
+            captions=(f"out {label}", f"{result.width}x{result.height}"),
+            max_width=writer.max_width,
+        )
+        path = folder / f"{label}.png"
+        write_png(path, picture)
+        outputs.append(path)
+
+    sheet = write_sheet(
+        folder / f"{frame.provenance.label}.html",
+        title=f"{pdf.name}, page {page}",
+        spread=frame.provenance.label,
+        overlays=writer.written,
+        outputs=outputs,
+        error=error,
+    )
+    click.echo(f"{len(writer.written)} overlay(s) and {len(outputs)} frame(s) out")
+    click.echo(f"contact sheet: {sheet}")
+    if not no_open:
+        click.launch(str(sheet.resolve()))
+    if error is not None:
+        click.echo(f"FAILED: {error}", err=True)
+        raise SystemExit(1)
+
+
+def _selected_pages(
+    source: Path, pages: str | None, hint: str = "--pages"
+) -> list[int]:
+    """Give the zero-based indices of the pages that a page option selects.
 
     Args:
         source: The PDF.
-        pages: The --pages value, or None for every page.
+        pages: The option value, or None for every page.
+        hint: The option name to give in an error message.
 
     Returns:
         The indices, sorted.
 
     Raises:
-        click.BadParameter: If the --pages value is not valid for this PDF.
+        click.BadParameter: If the value is not valid for this PDF.
     """
     pdf = pdfium.PdfDocument(source)
     try:
@@ -293,7 +415,7 @@ def _selected_pages(source: Path, pages: str | None) -> list[int]:
     try:
         return parse_page_range(pages, count)
     except ValueError as exc:
-        raise click.BadParameter(str(exc), param_hint="--pages") from exc
+        raise click.BadParameter(str(exc), param_hint=hint) from exc
 
 
 def _warn_if_upsampling(source: Path, dpi: int) -> None:
