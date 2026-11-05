@@ -96,6 +96,21 @@ page.
 Rendered pages are cached under `work\raster\`, so a second run does not render
 them again. `recto raster book.pdf --pages 9` only renders.
 
+### Check the OCR gain
+
+If [Tesseract](https://github.com/tesseract-ocr/tesseract) is on PATH with the
+Latin language data, this compares its mean word confidence on the raw spreads
+and on recto's column images:
+
+```powershell
+recto ocr-check book.pdf --pages 9-11
+```
+
+Tesseract reads each raw spread with its own layout analysis, and each column
+as one column. On pages of this scan, the columns score 5.7 to 9.5 points
+higher, from 0 to 100. Confidence is not accuracy, so this only shows that the
+cleaning helps Tesseract. Tesseract takes about 15 seconds a page.
+
 ## The manifest
 
 `manifest.jsonl` has one JSON object on each line: one for each column image,

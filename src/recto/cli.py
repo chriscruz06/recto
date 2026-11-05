@@ -8,6 +8,7 @@ without going through click.
 
 from __future__ import annotations
 
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,6 +20,15 @@ from recto.config import ProfileError, load_profile
 from recto.debug import DEFAULT_DEBUG_DIR, DebugWriter, draw_overlay
 from recto.frames import Frame, Provenance
 from recto.manifest import DEFAULT_OUT_DIR, ManifestWriter
+from recto.ocrcheck import (
+    COLUMN_PSM,
+    RAW_PSM,
+    Score,
+    TesseractError,
+    find_tesseract,
+    mean,
+    word_confidences,
+)
 from recto.pngio import write_png
 from recto.pipeline import Observers, Pipeline, StageError
 from recto.raster import (
@@ -387,6 +397,155 @@ def debug_command(
     if error is not None:
         click.echo(f"FAILED: {error}", err=True)
         raise SystemExit(1)
+
+
+@main.command("ocr-check")
+@click.argument(
+    "pdf",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+)
+@click.option(
+    "--pages",
+    metavar="RANGE",
+    required=True,
+    help=(
+        "Pages to compare, one-based and inclusive: 9, or 8-10. Tesseract "
+        "takes about 15 seconds a page, so keep the range small."
+    ),
+)
+@click.option(
+    "--lang",
+    default="lat",
+    show_default=True,
+    help="Tesseract language. tesseract --list-langs shows the installed ones.",
+)
+@click.option(
+    "--dpi",
+    type=click.IntRange(72, 1200),
+    default=DEFAULT_DPI,
+    show_default=True,
+    help="Render resolution.",
+)
+@click.option(
+    "--cache",
+    "cache_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_CACHE,
+    show_default=True,
+    help="Cache directory for rendered pages.",
+)
+@click.option(
+    "--profile",
+    "profile_path",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+    default=None,
+    help=(
+        "TOML file with the stage constants for a book. "
+        "Without it, the values measured on the Jammy edition apply."
+    ),
+)
+def ocr_check_command(
+    pdf: Path,
+    pages: str,
+    lang: str,
+    dpi: int,
+    cache_dir: Path,
+    profile_path: Path | None,
+) -> None:
+    """Compare Tesseract word confidence on raw spreads and on the columns.
+
+    Reads each selected page twice: the whole spread as rendered, with
+    Tesseract's own layout analysis, and each column image that the pipeline
+    gives. Prints the word count and the mean word confidence of each.
+    Confidence is not accuracy: this shows only whether the cleaning helps
+    Tesseract. Needs tesseract on PATH. Writes no images and no manifest.
+    """
+    try:
+        tesseract = find_tesseract()
+    except TesseractError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
+        profile = load_profile(profile_path) if profile_path is not None else None
+    except ProfileError as exc:
+        raise click.BadParameter(str(exc), param_hint="--profile") from exc
+    _selected_pages(pdf, pages)
+    pipeline = Pipeline(default_stages(profile))
+
+    total = Score()
+    click.echo(
+        f"{'page':<6}{'raw words':>10}{'raw conf':>10}"
+        f"{'col words':>11}{'col conf':>10}"
+    )
+    with tempfile.TemporaryDirectory(prefix="recto-ocr-") as tmp:
+        workdir = Path(tmp)
+        for page in rasterise(pdf, pages=pages, dpi=dpi, out_dir=cache_dir):
+            frame = Frame(
+                image=page.image,
+                provenance=Provenance(source=pdf, page_index=page.index, dpi=dpi),
+            )
+            score = Score()
+            try:
+                score.raw = word_confidences(
+                    page.image,
+                    tesseract=tesseract,
+                    lang=lang,
+                    psm=RAW_PSM,
+                    dpi=dpi,
+                    workdir=workdir,
+                )
+                for column in pipeline.run(frame):
+                    score.columns += word_confidences(
+                        column.image,
+                        tesseract=tesseract,
+                        lang=lang,
+                        psm=COLUMN_PSM,
+                        dpi=dpi,
+                        workdir=workdir,
+                    )
+            except TesseractError as exc:
+                raise click.ClickException(
+                    f"tesseract failed on p{page.number}: {exc}"
+                ) from exc
+            except StageError as exc:
+                click.echo(f"p{page.number:<5} skipped: {exc}", err=True)
+                continue
+            click.echo(_score_line(f"p{page.number}", score))
+            total.raw += score.raw
+            total.columns += score.columns
+
+    click.echo(_score_line("all", total))
+    raw, columns = mean(total.raw), mean(total.columns)
+    if raw is not None and columns is not None:
+        click.echo(f"columns minus raw: {columns - raw:+.1f} points of mean confidence")
+
+
+def _score_line(name: str, score: Score) -> str:
+    """Format one row of the ocr-check table.
+
+    Args:
+        name: The row label, for example p9 or all.
+        score: The word confidences of the row.
+
+    Returns:
+        The row, with "n/a" for a mean of no words.
+    """
+
+    def show(values: list[float]) -> str:
+        """Format a mean confidence, or n/a when there are no words.
+
+        Args:
+            values: The word confidences.
+
+        Returns:
+            The mean to one decimal, or n/a.
+        """
+        value = mean(values)
+        return "n/a" if value is None else f"{value:.1f}"
+
+    return (
+        f"{name:<6}{len(score.raw):>10}{show(score.raw):>10}"
+        f"{len(score.columns):>11}{show(score.columns):>10}"
+    )
 
 
 def _selected_pages(
