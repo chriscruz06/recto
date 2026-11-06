@@ -86,6 +86,10 @@ start = 300
 start_ink = 0.05
 line_depth = 35
 above = 20
+flush = 60
+letters = 2
+indent = 50
+short = 60
 
 # src/recto/stages/columns.py
 [split-columns]

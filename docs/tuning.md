@@ -522,6 +522,53 @@ A band that starts this far over the foot row is a line above it.
 - **Lower:** At 10, one frame changes.
 - **Higher:** At 30, three frames change.
 
+The four keys below are for the fallback. It works only on the 27 frames where
+no row cut can remove the foot row, because the left column runs on below it.
+
+### `flush = 60`
+
+A catchword in the right column ends this far from the column's right edge,
+or nearer.
+
+- **Lower:** At 20 or 30, one cut moves 5 px.
+- **Higher:** From 40 to 90, nothing changes. At 150, the signature P 3 on
+  part 2 p21 recto is found, but on part 3 p54 verso a speck line below the
+  catchword Tauri is taken, and Tauri stays.
+- **Measured:** The 18 catchwords end 15 px inside to 32 px outside the right
+  edge of their column.
+
+### `letters = 2`
+
+A foot line holds at least this many letters as tall as `line_min`.
+
+- **Lower:** At 1, specks count. The cut goes under the real catchword on four
+  frames, it moves 224 px up on part 3 p63 verso, and cuts appear on the title
+  page and on part 1 p4 verso.
+- **Higher:** At 3, the catchword Et on part 2 p70 verso stays, because it has
+  only two letters.
+
+### `indent = 50`
+
+A direction line starts at least this far in from the edge of the left
+column.
+
+- **Lower:** From 30, nothing changes.
+- **Higher:** Up to 70, nothing changes. At 80, the direction line of part 4
+  p8 recto stays.
+- **Measured:** The direction lines start 79 to 137 px in. A paragraph's
+  first line can be indented too, 67 px on part 4 p48 recto, but it runs to
+  the right edge.
+
+### `short = 60`
+
+A direction line ends at least this far short of the right edge of the left
+column.
+
+- **Lower:** From 30, nothing changes.
+- **Higher:** Up to 100, nothing changes. At 120, the direction line of part 2
+  p21 recto stays.
+- **Measured:** The direction lines end 112 to 194 px short of the right edge.
+
 ## `[split-columns]`
 
 Module: `src/recto/stages/columns.py`.
@@ -613,8 +660,12 @@ How far the window round the column gap reaches on each side.
 ### `upright = 2.0`
 
 At the column gap, a component this many times taller than wide is a piece of
-the rule. The stage leaves it as the cut leaves it.
+the rule. The stage leaves it as the cut leaves it. Strip-foot's fallback uses
+the same limit: such a component does not count as a catchword letter.
 
 - **Measured:** 222 thin upright pieces touch the gap in the four parts. Of 48
   sampled, 47 were the rule and one was a bracket.
-- **Lower, higher:** Not measured.
+- **Lower:** In strip-foot's fallback at 1.5, the catchword Et on part 2 p70
+  verso stays. Not measured for the column cut.
+- **Higher:** In strip-foot's fallback at 3.0, nothing changes. Not measured
+  for the column cut.

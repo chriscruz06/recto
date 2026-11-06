@@ -83,6 +83,9 @@ def default_stages(profile: Profile | None = None) -> list[Stage]:
     tuning = Tuning(**own("bands"))
     whole = own("whole")
     tallest = {key: value for key, value in whole.items() if key == "tallest"}
+    # The foot's fallback tells catchword letters from rule pieces by the same
+    # upright limit that keeps rule pieces out of the column cut.
+    foot = {k: v for k, v in whole.items() if k in ("tallest", "upright")}
     return [
         CropBorder(**own("crop-border")),
         Despeckle(**own("despeckle")),
@@ -91,7 +94,7 @@ def default_stages(profile: Profile | None = None) -> list[Stage]:
         Deskew(**own("deskew")),
         MaskFigures(**own("mask-figures")),
         StripHead(**own("strip-head"), tuning=tuning, **tallest),
-        StripFoot(**own("strip-foot"), tuning=tuning, **tallest),
+        StripFoot(**own("strip-foot"), tuning=tuning, **foot),
         BandLines(tuning),
         SplitColumns(**own("split-columns"), tuning=tuning, **whole),
     ]

@@ -38,7 +38,8 @@ Each PDF page goes through ten stages, in this order:
    can lean by different amounts.
 6. **mask-figures** whites out woodcuts, decorated initials and ornaments.
 7. **strip-head** removes the running head and the folio number.
-8. **strip-foot** removes the catchword and the signature mark.
+8. **strip-foot** removes the catchword, the signature mark and the direction
+   line.
 9. **band-lines** finds the text lines. It only draws them for the debug
    overlays. The other stages call the same function.
 10. **split-columns** cuts each page into its columns with a straight cut that
@@ -145,7 +146,7 @@ come after the others. Sort by `page` for the book order.
 ## Profiles
 
 Every constant has a default in the code, measured on the Jammy scan.
-`profiles/jammy-1651.toml` lists all 62 of them by stage, at their defaults:
+`profiles/jammy-1651.toml` lists all 66 of them by stage, at their defaults:
 
 ```toml
 [deskew]
@@ -193,11 +194,10 @@ their ink. They do not compare against stored output images.
   with two columns.
 - **Speckle at the outer edge.** A strip of speckle down the outer edge of many
   rectos stays in the last column image. The after image above shows it.
-- **Chapter ends.** On six chapter-end pages of the held-out parts, the foot
-  row is level with the last line of the left column, with the catchword CAPVT
-  or VISIO. A row cut cannot remove it, so it stays. The catchwords of part 2
-  page 21 recto and part 4 page 8 recto also stay, because a direction line in
-  the left column is the lowest line there.
+- **Signature without a catchword.** On chapter ends, where the left column
+  runs below the foot, recto finds the foot by its catchword, which is set
+  flush right. On part 2 page 21 recto there is no catchword, so the signature
+  P 3 stays.
 - **Index rerum.** The column cut fails on the opening page of the Index rerum
   (part 3, page 37, recto).
 - **Deskew.** On a page where the score is nearly flat, two machines can choose
