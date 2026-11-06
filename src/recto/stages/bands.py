@@ -285,6 +285,47 @@ def band_lines(
     return left_half, right_half
 
 
+def band_column(
+    image: np.ndarray,
+    dpi: int,
+    tuning: Tuning = Tuning(),
+) -> list[Band]:
+    """Find the lines of type in one column image, top to bottom.
+
+    The rules are the rules of band_lines, applied to the whole text block
+    instead of to two halves. A column image from recto run holds one column,
+    so a cut at its middle would break each line in two.
+
+    Args:
+        image: The greyscale column image.
+        dpi: The resolution of the image.
+        tuning: The constants. The module docstring gives the measurement
+            behind each one.
+
+    Returns:
+        The bands, in the coordinates of the image.
+    """
+    t = tuning
+    scale = dpi / REFERENCE_DPI
+
+    def px(length: float) -> int:
+        return max(1, round(length * scale))
+
+    pitch = px(t.pitch)
+    letters = letter_ink(
+        image,
+        area=max(1, round(t.letter_area * scale**2)),
+        stroke_height=2 * pitch,
+        stroke_aspect=t.stroke_aspect,
+    )
+
+    left, right = text_block(letters, fraction=t.block_fraction, bridge=px(t.block_gap))
+    # Half a pitch past each edge, as band_lines does at the outer edges.
+    start = max(0, left - pitch // 2)
+    end = min(letters.shape[1], right + pitch // 2)
+    return _band_half(letters[:, start:end], start, t, px)
+
+
 def _band_half(letters, offset: int, t: Tuning, px) -> list[Band]:
     """Every rule in the module docstring, applied to one half of the block."""
     profile = letters.mean(axis=1)

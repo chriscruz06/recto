@@ -51,7 +51,14 @@ from conftest import (
     masked_of,
     spread,
 )
-from recto.stages.bands import Band, band_lines
+from recto.stages.bands import (
+    Band,
+    Tuning,
+    band_column,
+    band_lines,
+    letter_ink,
+    text_block,
+)
 
 PITCH = (45, 53)
 """Source px. The median band spacing of a body half must lie in this range.
@@ -189,6 +196,60 @@ def test_no_body_line_is_split(case: tuple[int, str, int]) -> None:
     """
     centres = centres_under_head(*case)
     closest = min(b - a for a, b in zip(centres, centres[1:]))
+    assert closest >= SPLIT, f"{case}: two bands {closest:.0f} source px apart"
+
+
+@lru_cache(maxsize=None)
+def column_bands(page: int, side: str, half: int) -> list[Band]:
+    """Band one half of a 100 dpi page as a column image by itself.
+
+    The page is cut at the middle of its text block, as band_lines cuts it, so
+    each piece holds one column, as a column image from recto run does.
+
+    Args:
+        page: Page number of the spread.
+        side: VERSO or RECTO.
+        half: 0 for the left half, 1 for the right.
+
+    Returns:
+        The bands of that piece, in page rows.
+    """
+    t = Tuning()
+    frame = masked_of(spread(page))[side]
+    dpi = frame.provenance.dpi
+    scale = dpi / SOURCE_DPI
+    letters = letter_ink(
+        frame.image,
+        area=max(1, round(t.letter_area * scale**2)),
+        stroke_height=2 * max(1, round(t.pitch * scale)),
+        stroke_aspect=t.stroke_aspect,
+    )
+    bridge = max(1, round(t.block_gap * scale))
+    left, right = text_block(letters, fraction=t.block_fraction, bridge=bridge)
+    middle = (left + right) // 2
+    piece = frame.image[:, :middle] if half == 0 else frame.image[:, middle:]
+    return band_column(piece, dpi)
+
+
+@pytest.mark.parametrize("case", body_halves(), ids=half_id)
+def test_column_bands_sit_one_pitch_apart(case: tuple[int, str, int]) -> None:
+    """Check that band_column finds whole body lines in a single column.
+
+    The oracles are the pitch and the split floor of the two tests above.
+
+    Args:
+        case: Page number, side and half.
+    """
+    page, side, half = case
+    head_bottom, _ = HEAD_ROWS[(page, side)]
+    centres = [
+        source((b.top + b.bottom) / 2, page) for b in column_bands(page, side, half)
+    ]
+    centres = [c for c in centres if c > head_bottom]
+    spacing = median(b - a for a, b in zip(centres, centres[1:]))
+    closest = min(b - a for a, b in zip(centres, centres[1:]))
+    low, high = PITCH
+    assert low <= spacing <= high, f"{case}: median spacing {spacing:.0f} source px"
     assert closest >= SPLIT, f"{case}: two bands {closest:.0f} source px apart"
 
 
