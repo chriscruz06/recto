@@ -93,6 +93,8 @@ def test_profile_changes_what_a_stage_does() -> None:
         ("[deskew]\ncap = \"1\"\n", "must be float"),
         ("[deskew]\nscore_dpi = 150.5\n", "must be int"),
         ("[deskew]\nscore_dpi = true\n", "must be int"),
+        ("[split-spread]\nsingle = 1\n", "must be bool"),
+        ("[split-spread]\nodd_side = 1\n", "must be str"),
         ("[mask-figures]\npitch_range = [35]\n", "must be tuple[int, int]"),
         ("deskew = 1\n", "must be a [deskew] table"),
         ("[deskew\n", "not valid TOML"),
@@ -107,3 +109,11 @@ def test_bad_profile_is_refused(text: str, words: str) -> None:
     """
     with pytest.raises(ProfileError, match=words.replace("[", r"\[")):
         load_profile(written(text))
+
+
+def test_single_page_keys_reach_the_split() -> None:
+    """Check that the bool and str keys of split-spread are read and passed on."""
+    profile = load_profile(written('[split-spread]\nsingle = true\nodd_side = "recto"\n'))
+    split = {stage.name: stage for stage in default_stages(profile)}["split-spread"]
+    assert split.single is True
+    assert split.odd_side == "recto"

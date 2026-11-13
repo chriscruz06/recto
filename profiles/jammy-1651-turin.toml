@@ -1,0 +1,12 @@
+# Profile for the Google Books copy of the same volume from the University of
+# Turin: Jammy edition, Lyons 1651, Operum Tomus Undecimus.
+#
+# The scan has one page for each PDF page, at 600 dpi, in black and white.
+# Render it at 300 dpi: verso reads it as well at 300 dpi as at 600 dpi.
+#
+# Use it with:  recto run turin.pdf --profile profiles/jammy-1651-turin.toml
+
+[split-spread]
+# PDF page 29 is printed page 4, a verso. The parity holds to the end.
+single = true
+odd_side = "verso"

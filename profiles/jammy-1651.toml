@@ -24,6 +24,8 @@ min_area = 16
 inset = 32
 search_fraction = 0.12
 smooth_width = 16
+single = false
+odd_side = "verso"
 
 # src/recto/stages/blank.py
 [drop-blank]

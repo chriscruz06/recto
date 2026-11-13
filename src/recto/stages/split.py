@@ -40,6 +40,14 @@ threshold below which the split should decline, and inventing one would mean
 guessing. What it does instead is put the margin in the summary line, so a page
 where the fold was not clearly the darkest band near the middle is visible in
 the debug output rather than silently wrong.
+
+Single pages. Some scans hold one page for each PDF page, for example the
+Google Books copy of the same volume from the University of Turin. Its pages
+have no fold, and the darkest band near the middle is the rule between the two
+columns, so a cut there gives two half pages with wrong sides. With single set,
+the stage does not cut. It gives the page its side from the PDF page number:
+odd_side names the side of the odd pages. In the Turin copy, PDF page 29 is
+printed page 4, a verso, and the parity holds to the end of the volume.
 """
 
 from __future__ import annotations
@@ -69,6 +77,8 @@ class SplitSpread:
         search_fraction: float = SEARCH_FRACTION,
         smooth_width: int = SMOOTH_WIDTH,
         reference_dpi: int = REFERENCE_DPI,
+        single: bool = False,
+        odd_side: str = VERSO,
     ) -> None:
         """Keep the constants for the cut and for find_gutter.
 
@@ -81,13 +91,25 @@ class SplitSpread:
                 find_gutter searches.
             smooth_width: Smoothing, in px at reference_dpi, for find_gutter.
             reference_dpi: Resolution the px values are given at.
+            single: The PDF holds one page for each PDF page, so do not cut.
+            odd_side: With single, the side of the odd PDF pages, verso or
+                recto. The even pages get the other side.
+
+        Raises:
+            ValueError: If odd_side is not verso or recto.
         """
+        if odd_side not in (VERSO, RECTO):
+            raise ValueError(f"odd_side must be {VERSO} or {RECTO}, not {odd_side!r}")
+        self.single = single
+        self.odd_side = odd_side
         self.inset = inset
         self.search_fraction = search_fraction
         self.smooth_width = smooth_width
         self.reference_dpi = reference_dpi
 
     def apply(self, frame: Frame) -> StageOutput:
+        if self.single:
+            return self._single(frame)
         gutter = find_gutter(
             frame.image,
             frame.provenance.dpi,
@@ -142,4 +164,22 @@ class SplitSpread:
                 Finding("frame", Line(right, 0, right, frame.height), note="recto cut"),
             ],
             summary=summary,
+        )
+
+    def _single(self, frame: Frame) -> StageOutput:
+        """Give a single page its side, with no cut.
+
+        Args:
+            frame: The page, one page for each PDF page.
+
+        Returns:
+            The page with its side set.
+        """
+        number = frame.provenance.page_index + 1
+        other = RECTO if self.odd_side == VERSO else VERSO
+        side = self.odd_side if number % 2 == 1 else other
+        return StageOutput(
+            frames=[frame.derive(frame.image, side=side)],
+            findings=[],
+            summary=f"single page, not cut: PDF page {number} is a {side}",
         )

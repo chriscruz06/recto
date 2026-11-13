@@ -129,6 +129,26 @@ The width of the box filter over the column ink profile.
 - **Measured:** The smoothing keeps the printed column rules low. At 16 px the
   rule measured on page 76 falls to 0.30 ink, against 1.00 for the fold.
 
+### `single = false`
+
+Set it to true for a scan with one page on each PDF page. The stage then does
+not cut. Without it, the stage cuts a single page at the rule between its two
+columns, because that rule is the darkest band near the middle.
+
+- **Measured:** On the Turin copy (PDF page 156, printed page 131), the stage
+  without this key cut at the column rule and gave a verso and a recto of one
+  column each. With it, the page passes whole, and split-columns cuts the two
+  columns.
+
+### `odd_side = "verso"`
+
+With `single`, the side of the odd PDF pages, `verso` or `recto`. The even
+pages get the other side. The key has no effect without `single`.
+
+- **Measured:** In the Turin copy, PDF page 29 is printed page 4, a verso, and
+  PDF page 403 is page 4 of In Apocalypsim, a verso. The odd PDF pages are
+  versos through the whole volume.
+
 ## `[drop-blank]`
 
 Module: `src/recto/stages/blank.py`.

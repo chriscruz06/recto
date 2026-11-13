@@ -16,10 +16,13 @@ the fixtures at a different resolution.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 
 from conftest import FixturePage, cleaned, load_fixtures
-from recto.frames import RECTO, VERSO
+from recto.frames import RECTO, VERSO, Frame, Provenance
 from recto.stages.gutter import find_gutter
 from recto.stages.split import SplitSpread
 
@@ -150,3 +153,48 @@ def test_a_wrong_smoothing_is_caught() -> None:
     found = page.to_source(wrong.centre + offset)
 
     assert abs(found - GUTTER_CENTRE[2]) > TOLERANCE
+
+
+def single_page(page_index: int) -> Frame:
+    """Make a page as a single page scan gives it, with a column rule.
+
+    Args:
+        page_index: The zero-based PDF page index.
+
+    Returns:
+        A white page with a black rule down the middle, the shape that the
+        gutter search takes for a fold.
+    """
+    image = np.full((400, 300), 255, dtype=np.uint8)
+    image[:, 148:152] = 0
+    return Frame(
+        image=image,
+        provenance=Provenance(source=Path("single.pdf"), page_index=page_index),
+    )
+
+
+@pytest.mark.parametrize(
+    ("page_index", "odd_side", "side"),
+    [(28, VERSO, VERSO), (29, VERSO, RECTO), (28, RECTO, RECTO), (29, RECTO, VERSO)],
+)
+def test_single_page_is_not_cut_and_gets_its_side(
+    page_index: int, odd_side: str, side: str
+) -> None:
+    """Check that a single page passes whole, with the side of its parity.
+
+    Args:
+        page_index: The zero-based PDF page index. Index 28 is PDF page 29.
+        odd_side: The side of the odd PDF pages.
+        side: The side that the page must get.
+    """
+    frame = single_page(page_index)
+    out = SplitSpread(single=True, odd_side=odd_side).apply(frame).frames
+    assert len(out) == 1
+    assert out[0].provenance.side == side
+    assert out[0].image.shape == frame.image.shape
+
+
+def test_a_wrong_odd_side_is_refused() -> None:
+    """Check that odd_side takes only verso or recto."""
+    with pytest.raises(ValueError, match="odd_side"):
+        SplitSpread(single=True, odd_side="left")

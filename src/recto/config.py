@@ -180,7 +180,8 @@ def _checked(value: Any, kind: str, where: str) -> Any:
 
     Args:
         value: The value read from the profile.
-        kind: The declared type: "int", "float" or "tuple[int, int]".
+        kind: The declared type: "int", "float", "bool", "str" or
+            "tuple[int, int]".
         where: The file, section and key, for the error message.
 
     Returns:
@@ -194,6 +195,10 @@ def _checked(value: Any, kind: str, where: str) -> Any:
     if kind == "float" and numbers:
         return float(value)
     if kind == "int" and numbers and isinstance(value, int):
+        return value
+    if kind == "bool" and isinstance(value, bool):
+        return value
+    if kind == "str" and isinstance(value, str):
         return value
     if kind == "tuple[int, int]" and isinstance(value, list) and len(value) == 2:
         if all(isinstance(v, int) and not isinstance(v, bool) for v in value):

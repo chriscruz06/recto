@@ -32,7 +32,8 @@ Each PDF page goes through ten stages, in this order:
    by itself, because the frame is not the same width on each side.
 2. **despeckle** removes ink components smaller than a full stop.
 3. **split-spread** finds the gutter as the darkest band near the middle and
-   cuts the spread into a verso and a recto.
+   cuts the spread into a verso and a recto. For a scan with one page on each
+   PDF page, a profile tells it not to cut (see Profiles).
 4. **drop-blank** skips blank pages and records them.
 5. **deskew** straightens each page by itself. The two halves of one spread
    can lean by different amounts.
@@ -146,7 +147,7 @@ come after the others. Sort by `page` for the book order.
 ## Profiles
 
 Every constant has a default in the code, measured on the Jammy scan.
-`profiles/jammy-1651.toml` lists all 66 of them by stage, at their defaults:
+`profiles/jammy-1651.toml` lists all 68 of them by stage, at their defaults:
 
 ```toml
 [deskew]
@@ -172,6 +173,21 @@ A wrong section, key or type stops the run, and the message lists the correct
 ones. Lengths in a profile are pixels at 300 dpi. The stages scale them to the
 resolution of each page.
 
+`profiles/jammy-1651-turin.toml` is for the Google Books copy of the same
+volume from the University of Turin. That scan has one page on each PDF page,
+at 600 dpi. The profile sets `single = true` in `[split-spread]`, so the stage
+does not cut the page at its column rule, and gives each page its side from
+the parity of its PDF page. Render it at the default 300 dpi:
+
+```powershell
+recto run AlbertusMagnus_SuperIohannem_Turin.pdf --profile profiles\jammy-1651-turin.toml
+```
+
+All the other constants keep their Jammy values. Six kinds of Turin page
+(title page, prologue, chapter page, ordinary page, the title page and a page
+of In Apocalypsim) gave the expected number of columns with no other change.
+The overlays of two of them (PDF pages 28 and 156) were checked by eye.
+
 ## Tests
 
 ```powershell
@@ -191,7 +207,7 @@ their ink. They do not compare against stored output images.
 
 - **One book.** Every constant was measured on one volume. Another book will
   probably need a profile. The stages expect a bitonal scan of two-page spreads
-  with two columns.
+  with two columns, or of single pages with the Turin profile.
 - **Speckle at the outer edge.** A strip of speckle down the outer edge of many
   rectos stays in the last column image. The after image above shows it.
 - **Signature without a catchword.** On chapter ends, where the left column
